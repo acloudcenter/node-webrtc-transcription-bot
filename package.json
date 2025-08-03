@@ -1,0 +1,17 @@
+{
+  "name": "pexip-transcription-bot",
+  "version": "1.0.0",
+  "description": "WebRTC transcription bot for Pexip conferences",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "clean": "rm -rf output logs"
+  },
+  "dependencies": {
+    "@roamhq/wrtc": "^0.8.0",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1"
+  },
+  "type": "module"
+}
