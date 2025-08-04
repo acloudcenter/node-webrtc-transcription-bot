@@ -8,10 +8,7 @@
     "dev": "node --watch src/index.js",
     "test:mic": "node test/test-mic.js",
     "test:transcription": "node test/test-transcription.js",
-    "test:audio": "node test/test-audio.js",
-    "clean": "rm -rf output logs",
-    "clean:transcriptions": "rm -rf output/transcriptions",
-    "clean:audio": "rm -rf output/pcm output/wav"
+    "clean": "rm -rf output logs"
   },
   "dependencies": {
     "@roamhq/wrtc": "^0.8.0",

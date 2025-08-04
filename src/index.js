@@ -1,224 +1,219 @@
-import { PexipConnection } from './services/PexipConnection.js';
-import { AudioProcessor } from './services/AudioProcessor.js';
-import { ParticipantTracker } from './services/ParticipantTracker.js';
-import { OpenAIRealtimeProvider } from './services/transcription/providers/OpenAIRealtimeProvider.js';
-import dotenv from 'dotenv';
+#!/usr/bin/env node
 
-// Load environment variables
+import { PexipConnection } from './services/pexip/PexipConnection.js';
+import { OpenAITranscriptionService } from './services/transcription/OpenAITranscriptionService.js';
+import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+
 dotenv.config();
 
 async function main() {
-  console.log('Pexip Audio Extraction Bot Starting...\n');
-  console.log('Configuration:');
-  console.log(`   Node: ${process.env.PEXIP_NODE}`);
-  console.log(`   Conference: ${process.env.CONFERENCE_ALIAS}`);
-  console.log(`   Display Name: ${process.env.DISPLAY_NAME || 'Transcription Bot'}`);
-  console.log(`   Transcription: ${process.env.ENABLE_TRANSCRIPTION === 'true' ? 'Enabled' : 'Disabled'}\n`);
-  
-  // Validate configuration
+  console.log('='.repeat(60));
+  console.log('PEXIP TO OPENAI TRANSCRIPTION');
+  console.log('='.repeat(60));
+  console.log(`Pexip Node: ${process.env.PEXIP_NODE}`);
+  console.log(`Conference: ${process.env.CONFERENCE_ALIAS}`);
+  console.log('');
+
+  // Validate config
   if (!process.env.PEXIP_NODE || !process.env.CONFERENCE_ALIAS) {
-    console.error('Missing required environment variables!');
-    console.error('Please set PEXIP_NODE and CONFERENCE_ALIAS in .env file');
+    console.error('Missing PEXIP_NODE or CONFERENCE_ALIAS in .env');
     process.exit(1);
   }
 
-  // Create participant tracker
-  const participantTracker = new ParticipantTracker();
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Missing OPENAI_API_KEY in .env');
+    process.exit(1);
+  }
+
+  // Create output directory for transcripts
+  const outputDir = path.join(process.cwd(), 'output', 'transcriptions');
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  // Create transcript file with timestamp
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+  const transcriptFile = path.join(outputDir, `transcript_${timestamp}.txt`);
+  const transcriptJsonFile = path.join(outputDir, `transcript_${timestamp}.json`);
+  const transcriptStream = fs.createWriteStream(transcriptFile, { flags: 'a' });
+  const transcripts = [];
+
+  console.log(`Saving transcripts to: output/transcriptions/`);
+  console.log(`  Text: transcript_${timestamp}.txt`);
+  console.log(`  JSON: transcript_${timestamp}.json\n`);
+
+  // Create transcription service
+  const VAD_ENABLED = process.env.VAD_ENABLED !== 'false';  // Default true
+  const DEBUG_MODE = process.env.DEBUG_OPENAI === 'true';
+  const INCLUDE_LOGPROBS = process.env.INCLUDE_LOGPROBS === 'true';
   
-  // Create transcription provider if enabled
-  let transcriptionProvider = null;
-  if (process.env.ENABLE_TRANSCRIPTION === 'true') {
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('Transcription enabled but OPENAI_API_KEY not set!');
-      process.exit(1);
-    }
-    
-    transcriptionProvider = new OpenAIRealtimeProvider({
-      apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL || 'gpt-4o-transcribe',
-      language: process.env.TRANSCRIPTION_LANGUAGE || 'en',
-      prompt: process.env.TRANSCRIPTION_PROMPT || '',
-      vadThreshold: parseFloat(process.env.VAD_THRESHOLD) || 0.5,
-      vadSilenceDuration: parseInt(process.env.VAD_SILENCE_DURATION) || 500,
-      noiseReduction: process.env.NOISE_REDUCTION || 'near_field',
-      includeLogprobs: process.env.INCLUDE_LOGPROBS === 'true'
-    });
-    
-    // Set up transcription event handlers
-    transcriptionProvider.on('transcriptionDelta', (delta) => {
-      console.log(`[Transcription Delta] ${delta.text}`);
-    });
-    
-    transcriptionProvider.on('transcriptionComplete', (transcription) => {
-      console.log(`[Transcription Complete] ${transcription.text}`);
-    });
-    
-    transcriptionProvider.on('error', (error) => {
-      console.error('[Transcription Error]', error);
-    });
-    
-    transcriptionProvider.on('connected', () => {
-      console.log('Transcription service connected');
-    });
-    
-    transcriptionProvider.on('disconnected', () => {
-      console.log('Transcription service disconnected');
-    });
+  if (DEBUG_MODE) {
+    console.log('🔧 Debug mode enabled for OpenAI');
   }
   
-  // Create audio processor
-  const audioProcessor = new AudioProcessor({
-    saveRawPCM: process.env.SAVE_RAW_PCM !== 'false',
-    saveWAV: process.env.SAVE_WAV !== 'false',
-    outputDir: './output',
-    chunkDurationMs: parseInt(process.env.CHUNK_DURATION_MS) || 1000,
-    logStats: true,
-    onChunkReady: async (chunk) => {
-      if (chunk.speaker) {
-        console.log(`Chunk ready: #${chunk.chunkNumber} - Speaker: ${chunk.speaker.displayName}`);
-      } else {
-        console.log(`Chunk ready: #${chunk.chunkNumber} - No speaker identified`);
-      }
-      
-      // Send to transcription if enabled
-      if (transcriptionProvider && transcriptionProvider.isConnected) {
-        try {
-          await transcriptionProvider.processAudioChunk({
-            samples: chunk.samples,
-            sampleRate: chunk.sampleRate,
-            speaker: chunk.speaker,
-            timestamp: chunk.timestamp
-          });
-        } catch (error) {
-          console.error('Failed to send audio to transcription:', error);
-        }
-      }
-    }
+  const transcriptionService = new OpenAITranscriptionService({
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini-transcribe',
+    language: 'en',
+    vadThreshold: VAD_ENABLED ? 0.5 : 0,  // 0 disables VAD
+    vadSilenceDuration: VAD_ENABLED ? 500 : 0,
+    debug: DEBUG_MODE,
+    includeLogprobs: INCLUDE_LOGPROBS
   });
-  
-  // Link participant tracker to audio processor
-  audioProcessor.setParticipantTracker(participantTracker);
 
-  // Create Pexip connection with all callbacks
+  // Set up transcription handlers
+  transcriptionService.on('transcriptionDelta', (delta) => {
+    process.stdout.write(delta.text);  // Stream partial text to console
+  });
+
+  transcriptionService.on('transcriptionComplete', (transcription) => {
+    console.log('\n[✅ Complete]:', transcription.text);
+    
+    // Save to text file
+    const timestamp = new Date().toISOString();
+    transcriptStream.write(`[${timestamp}] ${transcription.text}\n\n`);
+    
+    // Build JSON entry
+    const jsonEntry = {
+      timestamp,
+      text: transcription.text,
+      itemId: transcription.itemId
+    };
+    
+    // Add logprobs if available
+    if (transcription.logprobs && INCLUDE_LOGPROBS) {
+      jsonEntry.logprobs = transcription.logprobs;
+      // Calculate confidence
+      const avgLogprob = transcription.logprobs.reduce((sum, lp) => sum + (lp.logprob || 0), 0) / transcription.logprobs.length;
+      jsonEntry.confidence = Math.exp(avgLogprob);
+    }
+    
+    // Add to JSON array
+    transcripts.push(jsonEntry);
+  });
+
+  transcriptionService.on('error', (error) => {
+    console.error('[Error]', error.message);
+  });
+
+  // Connect to OpenAI first
+  console.log('Connecting to OpenAI...');
+  await transcriptionService.connect();
+  console.log('✅ OpenAI connected\n');
+
+  // Track if we've logged sample rate
+  let sampleRateLogged = false;
+  
+  // Create Pexip connection
   const connection = new PexipConnection({
     nodeAddress: process.env.PEXIP_NODE,
     conferenceAlias: process.env.CONFERENCE_ALIAS,
-    displayName: process.env.DISPLAY_NAME || 'Transcription Bot',
+    displayName: process.env.DISPLAY_NAME || 'Simple Transcriber',
     pin: process.env.PIN || '',
     
-    // Audio data callback
-    onAudioData: (audioData) => {
-      audioProcessor.processAudioData(audioData);
-    },
-    
-    // Participant event callbacks
-    onParticipantJoined: (event) => {
-      participantTracker.addParticipant(event);
-    },
-    
-    onParticipantUpdated: (event) => {
-      participantTracker.updateParticipant(event);
-    },
-    
-    onParticipantLeft: (event) => {
-      participantTracker.removeParticipant(event);
-    },
-    
-    onStageUpdate: (event) => {
-      participantTracker.updateStage(event);
+    // Stream audio directly to OpenAI
+    onAudioData: async (audioData) => {
+      try {
+        // Log actual sample rate to understand what we're getting
+        if (!sampleRateLogged) {
+          console.log(`\n📊 Audio Stream Info:`);
+          console.log(`  Sample Rate: ${audioData.sampleRate} Hz`);
+          console.log(`  Channels: ${audioData.channelCount}`);
+          console.log(`  Bits per sample: ${audioData.bitsPerSample}`);
+          console.log(`  ✅ Audio pipeline connected: Pexip → Bot → OpenAI`);
+          sampleRateLogged = true;
+        }
+        
+        // Pass audio with actual sample rate from Pexip
+        await transcriptionService.processAudioChunk({
+          samples: audioData.samples,
+          sampleRate: audioData.sampleRate, // Use actual rate, likely 48000
+          timestamp: audioData.timestamp
+        });
+      } catch (error) {
+        console.error('Failed to send audio:', error.message);
+      }
     }
   });
 
-  try {
-    // Connect transcription service first if enabled
-    if (transcriptionProvider) {
-      console.log('Connecting to transcription service...');
-      await transcriptionProvider.connect();
-    }
-    
-    // Connect to conference
-    console.log('Connecting to Pexip conference...\n');
-    await connection.connect();
-    
-    // Monitor status
-    let lastSinkCount = 0;
-    let lastParticipantCount = 0;
-    const monitorInterval = setInterval(() => {
-      const sinkCount = connection.getActiveSinks();
-      const participantCount = participantTracker.participants.size;
-      
-      if (sinkCount !== lastSinkCount) {
-        console.log(`\nActive audio sinks: ${sinkCount}`);
-        lastSinkCount = sinkCount;
-      }
-      
-      if (participantCount !== lastParticipantCount) {
-        console.log(`\nParticipants in conference: ${participantCount}`);
-        const participants = participantTracker.getAllParticipants();
-        participants.forEach(p => {
-          const status = p.isSpeaking ? 'Speaking' : p.isMuted ? 'Muted' : 'Silent';
-          console.log(`   ${p.displayName}: ${status}`);
-        });
-        lastParticipantCount = participantCount;
-      }
-      
-      // Show current speaker
-      const currentSpeaker = participantTracker.getCurrentSpeaker();
-      if (currentSpeaker) {
-        console.log(`\nCurrent speaker: ${currentSpeaker.displayName}`);
-      }
-    }, 5000);
+  // Connect to Pexip
+  console.log('Connecting to Pexip conference...');
+  await connection.connect();
+  console.log('✅ Pexip connected\n');
+  console.log('Transcription active. Press Ctrl+C to stop.\n');
+  console.log('-'.repeat(60));
 
-    // Handle graceful shutdown
-    const shutdown = async () => {
-      console.log('\n\nShutting down gracefully...');
-      clearInterval(monitorInterval);
-      
-      // Show final statistics
-      console.log('\nFinal Statistics:');
-      const stats = participantTracker.getStatistics();
-      console.log(`   Total participants: ${stats.totalParticipants}`);
-      if (stats.participants.length > 0) {
-        console.log('\n   Speaking time breakdown:');
-        stats.participants.forEach(p => {
-          const seconds = Math.round(p.totalSpeakingTime / 1000);
-          console.log(`     ${p.displayName}: ${seconds}s (${p.percentageOfTime}%)`);
-        });
+  // Only commit audio buffer if VAD is disabled
+  let commitInterval = null;
+  if (!VAD_ENABLED) {
+    console.log('VAD disabled - will manually commit audio every 2 seconds');
+    commitInterval = setInterval(() => {
+      if (transcriptionService.isConnected) {
+        transcriptionService.commitAudioBuffer();
       }
-      
-      // Stop audio processor first
-      audioProcessor.stop();
-      
-      // Disconnect transcription service
-      if (transcriptionProvider) {
-        await transcriptionProvider.disconnect();
-      }
-      
-      // Then disconnect from conference
-      await connection.disconnect();
-      
-      console.log('Goodbye!');
-      process.exit(0);
-    };
-
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-
-    // Keep the bot running
-    console.log('\nBot is running! Audio extraction active.\n');
-    console.log('Audio data is being saved to ./output directory');
-    console.log('Press Ctrl+C to stop.\n');
-
-  } catch (error) {
-    console.error('Fatal error:', error);
-    audioProcessor.stop();
-    if (transcriptionProvider) {
-      await transcriptionProvider.disconnect();
-    }
-    await connection.disconnect();
-    process.exit(1);
+    }, 2000);  // Commit every 2 seconds
+  } else {
+    console.log('VAD enabled - OpenAI will auto-detect speech and commit');
   }
+  
+  // Periodic stats reporting (every 30 seconds)
+  const statsInterval = setInterval(() => {
+    const stats = transcriptionService.getStats();
+    if (stats.isConnected && stats.transcriptionsCompleted > 0) {
+      console.log(`\n📊 Stats: ${stats.transcriptionsCompleted} transcriptions | ${(stats.audioBytesSent/1024).toFixed(0)}KB sent | Runtime: ${stats.runtime.toFixed(0)}s`);
+    }
+  }, 30000);
+
+  // Handle shutdown
+  let isShuttingDown = false;
+  const shutdown = async () => {
+    // Prevent multiple shutdown calls
+    if (isShuttingDown) {
+      return;
+    }
+    isShuttingDown = true;
+    
+    console.log('\n\n🛑 Shutting down gracefully...');
+    
+    // Clear intervals
+    if (commitInterval) {
+      clearInterval(commitInterval);
+    }
+    if (statsInterval) {
+      clearInterval(statsInterval);
+    }
+    
+    // Save final transcripts
+    transcriptStream.end();
+    if (transcripts.length > 0) {
+      fs.writeFileSync(transcriptJsonFile, JSON.stringify(transcripts, null, 2));
+      console.log(`\n💾 Transcripts saved:`);
+      console.log(`  ${transcripts.length} transcriptions`);
+      console.log(`  Files in: output/transcriptions/`);
+    } else {
+      console.log('\n📝 No transcriptions captured');
+    }
+    
+    // Disconnect services in order
+    try {
+      console.log('\nDisconnecting from services...');
+      await transcriptionService.disconnect();
+      console.log('  ✅ OpenAI disconnected');
+      
+      await connection.disconnect();
+      console.log('  ✅ Pexip disconnected');
+    } catch (error) {
+      console.error('Error during shutdown:', error.message);
+    }
+    
+    console.log('\n👋 Goodbye!');
+    process.exit(0);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
-// Run the bot
 main().catch(console.error);
