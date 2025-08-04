@@ -1,6 +1,7 @@
 import { PexipConnection } from './services/PexipConnection.js';
 import { AudioProcessor } from './services/AudioProcessor.js';
 import { ParticipantTracker } from './services/ParticipantTracker.js';
+import { OpenAIRealtimeProvider } from './services/transcription/providers/OpenAIRealtimeProvider.js';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -11,7 +12,8 @@ async function main() {
   console.log('Configuration:');
   console.log(`   Node: ${process.env.PEXIP_NODE}`);
   console.log(`   Conference: ${process.env.CONFERENCE_ALIAS}`);
-  console.log(`   Display Name: ${process.env.DISPLAY_NAME || 'Transcription Bot'}\n`);
+  console.log(`   Display Name: ${process.env.DISPLAY_NAME || 'Transcription Bot'}`);
+  console.log(`   Transcription: ${process.env.ENABLE_TRANSCRIPTION === 'true' ? 'Enabled' : 'Disabled'}\n`);
   
   // Validate configuration
   if (!process.env.PEXIP_NODE || !process.env.CONFERENCE_ALIAS) {
@@ -23,19 +25,73 @@ async function main() {
   // Create participant tracker
   const participantTracker = new ParticipantTracker();
   
+  // Create transcription provider if enabled
+  let transcriptionProvider = null;
+  if (process.env.ENABLE_TRANSCRIPTION === 'true') {
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('Transcription enabled but OPENAI_API_KEY not set!');
+      process.exit(1);
+    }
+    
+    transcriptionProvider = new OpenAIRealtimeProvider({
+      apiKey: process.env.OPENAI_API_KEY,
+      model: process.env.OPENAI_MODEL || 'gpt-4o-transcribe',
+      language: process.env.TRANSCRIPTION_LANGUAGE || 'en',
+      prompt: process.env.TRANSCRIPTION_PROMPT || '',
+      vadThreshold: parseFloat(process.env.VAD_THRESHOLD) || 0.5,
+      vadSilenceDuration: parseInt(process.env.VAD_SILENCE_DURATION) || 500,
+      noiseReduction: process.env.NOISE_REDUCTION || 'near_field',
+      includeLogprobs: process.env.INCLUDE_LOGPROBS === 'true'
+    });
+    
+    // Set up transcription event handlers
+    transcriptionProvider.on('transcriptionDelta', (delta) => {
+      console.log(`[Transcription Delta] ${delta.text}`);
+    });
+    
+    transcriptionProvider.on('transcriptionComplete', (transcription) => {
+      console.log(`[Transcription Complete] ${transcription.text}`);
+    });
+    
+    transcriptionProvider.on('error', (error) => {
+      console.error('[Transcription Error]', error);
+    });
+    
+    transcriptionProvider.on('connected', () => {
+      console.log('Transcription service connected');
+    });
+    
+    transcriptionProvider.on('disconnected', () => {
+      console.log('Transcription service disconnected');
+    });
+  }
+  
   // Create audio processor
   const audioProcessor = new AudioProcessor({
-    saveRawPCM: true,  // Save raw PCM chunks
-    saveWAV: true,     // Also save as WAV files
+    saveRawPCM: process.env.SAVE_RAW_PCM !== 'false',
+    saveWAV: process.env.SAVE_WAV !== 'false',
     outputDir: './output',
-    chunkDurationMs: 1000, // 1 second chunks
+    chunkDurationMs: parseInt(process.env.CHUNK_DURATION_MS) || 1000,
     logStats: true,
-    onChunkReady: (chunk) => {
-      // This is where you would send to transcription service
+    onChunkReady: async (chunk) => {
       if (chunk.speaker) {
         console.log(`Chunk ready: #${chunk.chunkNumber} - Speaker: ${chunk.speaker.displayName}`);
       } else {
         console.log(`Chunk ready: #${chunk.chunkNumber} - No speaker identified`);
+      }
+      
+      // Send to transcription if enabled
+      if (transcriptionProvider && transcriptionProvider.isConnected) {
+        try {
+          await transcriptionProvider.processAudioChunk({
+            samples: chunk.samples,
+            sampleRate: chunk.sampleRate,
+            speaker: chunk.speaker,
+            timestamp: chunk.timestamp
+          });
+        } catch (error) {
+          console.error('Failed to send audio to transcription:', error);
+        }
       }
     }
   });
@@ -74,6 +130,12 @@ async function main() {
   });
 
   try {
+    // Connect transcription service first if enabled
+    if (transcriptionProvider) {
+      console.log('Connecting to transcription service...');
+      await transcriptionProvider.connect();
+    }
+    
     // Connect to conference
     console.log('Connecting to Pexip conference...\n');
     await connection.connect();
@@ -127,6 +189,11 @@ async function main() {
       // Stop audio processor first
       audioProcessor.stop();
       
+      // Disconnect transcription service
+      if (transcriptionProvider) {
+        await transcriptionProvider.disconnect();
+      }
+      
       // Then disconnect from conference
       await connection.disconnect();
       
@@ -145,6 +212,9 @@ async function main() {
   } catch (error) {
     console.error('Fatal error:', error);
     audioProcessor.stop();
+    if (transcriptionProvider) {
+      await transcriptionProvider.disconnect();
+    }
     await connection.disconnect();
     process.exit(1);
   }

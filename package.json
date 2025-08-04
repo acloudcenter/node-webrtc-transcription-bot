@@ -6,12 +6,19 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "clean": "rm -rf output logs"
+    "test:mic": "node test/test-mic.js",
+    "test:transcription": "node test/test-transcription.js",
+    "test:audio": "node test/test-audio.js",
+    "clean": "rm -rf output logs",
+    "clean:transcriptions": "rm -rf output/transcriptions",
+    "clean:audio": "rm -rf output/pcm output/wav"
   },
   "dependencies": {
     "@roamhq/wrtc": "^0.8.0",
     "axios": "^1.6.2",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "node-record-lpcm16": "^1.0.1",
+    "ws": "^8.18.3"
   },
   "type": "module"
 }
