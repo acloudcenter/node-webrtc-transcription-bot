@@ -1,4 +1,5 @@
 import wrtc from '@roamhq/wrtc';
+import { AudioValidator } from '../../utils/AudioValidator.js';
 
 const { RTCPeerConnection, RTCSessionDescription, nonstandard } = wrtc;
 const { RTCAudioSink } = nonstandard;
@@ -159,6 +160,11 @@ export class WebRTCHandler {
         
         // Pass audio data to callback
         if (this.onAudioData && data.samples) {
+          // Validate periodically (every 100th call to reduce logs)
+          if (sampleCount % 16000 === 0) { // Once per second at 16kHz
+            AudioValidator.validateAudio(data.samples, data.sampleRate, 'WebRTC Input');
+          }
+          
           this.onAudioData({
             trackId: track.id,
             samples: data.samples,

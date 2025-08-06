@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { PexipConnection } from './services/pexip/PexipConnection.js';
-import { OpenAITranscriptionService } from './services/transcription/OpenAITranscriptionService.js';
+import { TranscriptionFactory } from './services/transcription/TranscriptionFactory.js';
+import { TranscriptManager } from './utils/TranscriptManager.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -9,8 +10,10 @@ import path from 'path';
 dotenv.config();
 
 async function main() {
+  const PROVIDER = process.env.TRANSCRIPTION_PROVIDER || 'openai';
+  
   console.log('='.repeat(60));
-  console.log('PEXIP TO OPENAI TRANSCRIPTION');
+  console.log(`PEXIP TO ${PROVIDER.toUpperCase()} TRANSCRIPTION`);
   console.log('='.repeat(60));
   console.log(`Pexip Node: ${process.env.PEXIP_NODE}`);
   console.log(`Conference: ${process.env.CONFERENCE_ALIAS}`);
@@ -22,46 +25,43 @@ async function main() {
     process.exit(1);
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    console.error('Missing OPENAI_API_KEY in .env');
+  // Validate provider API key
+  try {
+    TranscriptionFactory.validateProvider(PROVIDER);
+  } catch (error) {
+    console.error(error.message);
     process.exit(1);
   }
 
-  // Create output directory for transcripts
-  const outputDir = path.join(process.cwd(), 'output', 'transcriptions');
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
-  // Create transcript file with timestamp
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-  const transcriptFile = path.join(outputDir, `transcript_${timestamp}.txt`);
-  const transcriptJsonFile = path.join(outputDir, `transcript_${timestamp}.json`);
-  const transcriptStream = fs.createWriteStream(transcriptFile, { flags: 'a' });
-  const transcripts = [];
-
-  console.log(`Saving transcripts to: output/transcriptions/`);
-  console.log(`  Text: transcript_${timestamp}.txt`);
-  console.log(`  JSON: transcript_${timestamp}.json\n`);
+  // Create transcript manager for dual output
+  const transcriptManager = new TranscriptManager();
 
   // Create transcription service
   const VAD_ENABLED = process.env.VAD_ENABLED !== 'false';  // Default true
-  const DEBUG_MODE = process.env.DEBUG_OPENAI === 'true';
+  const VAD_TYPE = process.env.VAD_TYPE || 'server_vad';  // 'server_vad' or 'semantic_vad'
+  const VAD_EAGERNESS = process.env.VAD_EAGERNESS || 'auto'; // For semantic VAD: 'low', 'medium', 'high', 'auto'
+  const DEBUG_MODE = process.env.DEBUG_OPENAI === 'true' || process.env.DEBUG_GEMINI === 'true';
   const INCLUDE_LOGPROBS = process.env.INCLUDE_LOGPROBS === 'true';
   
   if (DEBUG_MODE) {
-    console.log('🔧 Debug mode enabled for OpenAI');
+    console.log(`🔧 Debug mode enabled for ${PROVIDER}`);
   }
   
-  const transcriptionService = new OpenAITranscriptionService({
-    apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini-transcribe',
-    language: 'en',
-    vadThreshold: VAD_ENABLED ? 0.5 : 0,  // 0 disables VAD
-    vadSilenceDuration: VAD_ENABLED ? 500 : 0,
+  // Provider-specific config
+  const transcriptionConfig = {
+    apiKey: PROVIDER === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY,
+    model: PROVIDER === 'gemini' ? 'gemini-live-2.5-flash-preview' : (process.env.OPENAI_MODEL || 'gpt-4o-transcribe'),
+    language: process.env.TRANSCRIPTION_LANGUAGE || 'en',
+    vadEnabled: VAD_ENABLED,
+    vadType: VAD_TYPE,
+    vadThreshold: parseFloat(process.env.VAD_THRESHOLD || '0.5'),
+    vadSilenceDurationMs: parseInt(process.env.VAD_SILENCE_DURATION || '500'),
+    vadEagerness: VAD_EAGERNESS,
     debug: DEBUG_MODE,
     includeLogprobs: INCLUDE_LOGPROBS
-  });
+  };
+  
+  const transcriptionService = TranscriptionFactory.create(PROVIDER, transcriptionConfig);
 
   // Set up transcription handlers
   transcriptionService.on('transcriptionDelta', (delta) => {
@@ -71,37 +71,33 @@ async function main() {
   transcriptionService.on('transcriptionComplete', (transcription) => {
     console.log('\n[✅ Complete]:', transcription.text);
     
-    // Save to text file
-    const timestamp = new Date().toISOString();
-    transcriptStream.write(`[${timestamp}] ${transcription.text}\n\n`);
-    
-    // Build JSON entry
-    const jsonEntry = {
-      timestamp,
-      text: transcription.text,
-      itemId: transcription.itemId
+    // Add to transcript manager with metadata
+    const metadata = {
+      itemId: transcription.itemId,
+      previousItemId: transcription.previousItemId,
+      contentIndex: transcription.contentIndex
     };
     
     // Add logprobs if available
     if (transcription.logprobs && INCLUDE_LOGPROBS) {
-      jsonEntry.logprobs = transcription.logprobs;
+      metadata.logprobs = transcription.logprobs;
       // Calculate confidence
       const avgLogprob = transcription.logprobs.reduce((sum, lp) => sum + (lp.logprob || 0), 0) / transcription.logprobs.length;
-      jsonEntry.confidence = Math.exp(avgLogprob);
+      metadata.confidence = Math.exp(avgLogprob);
     }
     
-    // Add to JSON array
-    transcripts.push(jsonEntry);
+    // Save transcription
+    transcriptManager.addTranscription(transcription.text, metadata);
   });
 
   transcriptionService.on('error', (error) => {
     console.error('[Error]', error.message);
   });
 
-  // Connect to OpenAI first
-  console.log('Connecting to OpenAI...');
+  // Connect to transcription service first
+  console.log(`Connecting to ${PROVIDER}...`);
   await transcriptionService.connect();
-  console.log('✅ OpenAI connected\n');
+  console.log(`✅ ${PROVIDER} connected\n`);
 
   // Track if we've logged sample rate
   let sampleRateLogged = false;
@@ -122,7 +118,7 @@ async function main() {
           console.log(`  Sample Rate: ${audioData.sampleRate} Hz`);
           console.log(`  Channels: ${audioData.channelCount}`);
           console.log(`  Bits per sample: ${audioData.bitsPerSample}`);
-          console.log(`  ✅ Audio pipeline connected: Pexip → Bot → OpenAI`);
+          console.log(`  ✅ Audio pipeline connected: Pexip → Bot → ${PROVIDER}`);
           sampleRateLogged = true;
         }
         
@@ -155,14 +151,19 @@ async function main() {
       }
     }, 2000);  // Commit every 2 seconds
   } else {
-    console.log('VAD enabled - OpenAI will auto-detect speech and commit');
+    if (VAD_TYPE === 'semantic_vad') {
+      console.log(`Semantic VAD enabled (eagerness: ${VAD_EAGERNESS}) - smarter speech detection`);
+    } else {
+      console.log(`Server VAD enabled - ${PROVIDER} will auto-detect speech and commit`);
+    }
   }
   
   // Periodic stats reporting (every 30 seconds)
   const statsInterval = setInterval(() => {
-    const stats = transcriptionService.getStats();
-    if (stats.isConnected && stats.transcriptionsCompleted > 0) {
-      console.log(`\n📊 Stats: ${stats.transcriptionsCompleted} transcriptions | ${(stats.audioBytesSent/1024).toFixed(0)}KB sent | Runtime: ${stats.runtime.toFixed(0)}s`);
+    const serviceStats = transcriptionService.getStats();
+    const transcriptStats = transcriptManager.getStats();
+    if (serviceStats.isConnected && transcriptStats.transcriptionCount > 0) {
+      console.log(`\n📊 Stats: ${transcriptStats.transcriptionCount} transcriptions | ${transcriptStats.totalWords} words | ${(serviceStats.audioBytesSent/1024).toFixed(0)}KB sent | Runtime: ${serviceStats.runtime.toFixed(0)}s`);
     }
   }, 30000);
 
@@ -185,12 +186,13 @@ async function main() {
       clearInterval(statsInterval);
     }
     
-    // Save final transcripts
-    transcriptStream.end();
-    if (transcripts.length > 0) {
-      fs.writeFileSync(transcriptJsonFile, JSON.stringify(transcripts, null, 2));
+    // Save all transcript files
+    const stats = transcriptManager.getStats();
+    if (stats.transcriptionCount > 0) {
+      const files = await transcriptManager.save();
       console.log(`\n💾 Transcripts saved:`);
-      console.log(`  ${transcripts.length} transcriptions`);
+      console.log(`  ${stats.transcriptionCount} transcriptions`);
+      console.log(`  ${stats.totalWords} words`);
       console.log(`  Files in: output/transcriptions/`);
     } else {
       console.log('\n📝 No transcriptions captured');
@@ -200,7 +202,7 @@ async function main() {
     try {
       console.log('\nDisconnecting from services...');
       await transcriptionService.disconnect();
-      console.log('  ✅ OpenAI disconnected');
+      console.log(`  ✅ ${PROVIDER} disconnected`);
       
       await connection.disconnect();
       console.log('  ✅ Pexip disconnected');

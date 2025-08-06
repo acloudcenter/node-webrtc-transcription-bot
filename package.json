@@ -5,16 +5,23 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:server": "node src/server.js",
     "dev": "node --watch src/index.js",
+    "dev:server": "node --watch src/server.js",
     "test:mic": "node test/test-mic.js",
     "test:transcription": "node test/test-transcription.js",
+    "test:widget": "echo 'Open test/test-widget.html in your browser'",
     "clean": "rm -rf output logs"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.0",
     "@roamhq/wrtc": "^0.8.0",
     "axios": "^1.6.2",
+    "cors": "^2.8.5",
     "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "node-record-lpcm16": "^1.0.1",
+    "wavefile": "^11.0.0",
     "ws": "^8.18.3"
   },
   "type": "module"

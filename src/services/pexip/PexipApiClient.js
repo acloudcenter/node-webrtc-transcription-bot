@@ -60,8 +60,10 @@ export class PexipApiClient {
     this.token = result.token;
     this.participantUuid = result.participant_uuid;
     this.turnServers = result.turn || null;
+    this.tokenExpiry = result.expires ? parseInt(result.expires) : 120; // Default 120 seconds
     
     console.log(`Token obtained, participant UUID: ${this.participantUuid}`);
+    console.log(`Token expires in: ${this.tokenExpiry} seconds`);
     if (this.turnServers) {
       console.log(`TURN servers available: ${this.turnServers.length}`);
     }
@@ -69,7 +71,8 @@ export class PexipApiClient {
     return {
       token: this.token,
       participantUuid: this.participantUuid,
-      turnServers: this.turnServers
+      turnServers: this.turnServers,
+      expires: this.tokenExpiry
     };
   }
 
@@ -183,6 +186,48 @@ export class PexipApiClient {
       } else {
         console.error('Disconnect error:', error.message);
       }
+    }
+  }
+
+  /**
+   * Refresh authentication token
+   */
+  async refreshToken() {
+    if (!this.token) {
+      throw new Error('No token to refresh');
+    }
+    
+    console.log('Refreshing Pexip token...');
+    
+    try {
+      const response = await axios.post(
+        `${this.baseUrl}/refresh_token`,
+        {},
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'token': this.token
+          }
+        }
+      );
+      
+      if (response.status !== 200) {
+        throw new Error(`Token refresh failed: ${response.status}`);
+      }
+      
+      const result = response.data.result;
+      this.token = result.token;
+      this.tokenExpiry = result.expires ? parseInt(result.expires) : 120;
+      
+      console.log(`Token refreshed, expires in: ${this.tokenExpiry} seconds`);
+      
+      return {
+        token: this.token,
+        expires: this.tokenExpiry
+      };
+    } catch (error) {
+      console.error('Token refresh failed:', error.message);
+      throw error;
     }
   }
 

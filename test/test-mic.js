@@ -1,4 +1,4 @@
-import { OpenAIRealtimeProvider } from '../src/services/transcription/providers/OpenAIRealtimeProvider.js';
+import { OpenAITranscriptionService } from '../src/services/transcription/OpenAITranscriptionService.js';
 import recorder from 'node-record-lpcm16';
 import dotenv from 'dotenv';
 import fs from 'fs';
@@ -41,16 +41,16 @@ async function testMicrophoneTranscription() {
   // process.env.DEBUG_OPENAI = 'true';
   
   // Create the transcription provider
-  const provider = new OpenAIRealtimeProvider({
+  const provider = new OpenAITranscriptionService({
     apiKey: process.env.OPENAI_API_KEY,
-    model: 'whisper-1',
+    model: 'gpt-4o-transcribe',
     language: 'en',
-    prompt: '',
+    transcriptionPrompt: '',
     vadThreshold: 0.5,
-    vadSilenceDuration: 1000,
-    noiseReduction: 'near_field',
+    vadSilenceDurationMs: 1000,
+    inputAudioNoiseReductionType: 'near_field',
     includeLogprobs: false,
-    sendDirectly: true
+    debug: false
   });
   
   // Set up event handlers

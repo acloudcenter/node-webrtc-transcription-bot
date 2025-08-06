@@ -22,6 +22,7 @@ export class PexipConnection {
     this.eventPollInterval = null;
     this.isRunning = false;
     this.pendingIceCandidates = [];  // Queue for ICE candidates before we have callUuid
+    this.tokenRefreshTimer = null;  // Timer for token refresh
   }
 
   /**
@@ -32,10 +33,13 @@ export class PexipConnection {
       console.log('=== Connecting to Pexip Conference ===');
       
       // Step 1: Get authentication token
-      const { token, participantUuid, turnServers } = await this.api.requestToken(
+      const { token, participantUuid, turnServers, expires } = await this.api.requestToken(
         this.config.displayName,
         this.config.pin
       );
+
+      // Set up token refresh timer (refresh 30 seconds before expiry)
+      this.startTokenRefresh(expires);
 
       // Step 2: Create WebRTC peer connection
       this.webrtc.createPeerConnection(turnServers);
@@ -161,6 +165,48 @@ export class PexipConnection {
   }
 
   /**
+   * Start token refresh timer
+   */
+  startTokenRefresh(expiresInSeconds) {
+    // Clear any existing timer
+    if (this.tokenRefreshTimer) {
+      clearTimeout(this.tokenRefreshTimer);
+    }
+
+    // Refresh 30 seconds before expiry (or at 75% of lifetime for shorter tokens)
+    const refreshBuffer = Math.min(30, Math.floor(expiresInSeconds * 0.25));
+    const refreshInterval = (expiresInSeconds - refreshBuffer) * 1000;
+
+    console.log(`Token refresh scheduled in ${refreshInterval / 1000} seconds`);
+
+    this.tokenRefreshTimer = setTimeout(async () => {
+      if (!this.isRunning) return;
+
+      try {
+        const { expires } = await this.api.refreshToken();
+        console.log('✅ Token refreshed successfully');
+        
+        // Schedule next refresh
+        this.startTokenRefresh(expires);
+      } catch (error) {
+        console.error('❌ Token refresh failed:', error.message);
+        // Token refresh failed - connection will likely drop
+        // Could implement retry logic here if needed
+      }
+    }, refreshInterval);
+  }
+
+  /**
+   * Stop token refresh timer
+   */
+  stopTokenRefresh() {
+    if (this.tokenRefreshTimer) {
+      clearTimeout(this.tokenRefreshTimer);
+      this.tokenRefreshTimer = null;
+    }
+  }
+
+  /**
    * Disconnect from conference
    */
   async disconnect() {
@@ -173,19 +219,22 @@ export class PexipConnection {
     console.log('\n=== Disconnecting from Pexip ===');
     this.isRunning = false;
     
-    // Step 1: Stop event polling
+    // Step 1: Stop token refresh
+    this.stopTokenRefresh();
+    
+    // Step 2: Stop event polling
     if (this.eventPollTimeout) {
       clearTimeout(this.eventPollTimeout);
       this.eventPollTimeout = null;
     }
 
-    // Step 2: Close WebRTC connection first (this stops media)
+    // Step 3: Close WebRTC connection first (this stops media)
     this.webrtc.disconnect();
     
-    // Step 3: Small delay to ensure WebRTC is closed
+    // Step 4: Small delay to ensure WebRTC is closed
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Step 4: Disconnect from Pexip API
+    // Step 5: Disconnect from Pexip API
     try {
       await this.api.disconnectCall(this.callUuid);
       await this.api.releaseToken();

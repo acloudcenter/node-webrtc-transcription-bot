@@ -2,408 +2,102 @@ import WebSocket from 'ws';
 import { resampleAudio } from '../../utils/AudioResampler.js';
 
 /**
- * OpenAI Realtime API transcription service
+ * OpenAI Realtime API transcription service for bot
  * Handles WebSocket connection and audio streaming to OpenAI
  */
+
+// OpenAI Realtime API constants
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?intent=transcription';
+const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe'; // Default to gpt-4o-mini-transcribe
+const OPENAI_REQUIRED_SAMPLE_RATE = 24000;  // OpenAI requires 24kHz for PCM16
+const OPENAI_BETA_HEADER = 'realtime=v1';
+const DEFAULT_BUFFER_DURATION_MS = 100; // 100ms at 24kHz-Required for OpenAI Realtime API
+const OPENAI_AUDIO_FORMAT = 'pcm16';
+
 export class OpenAITranscriptionService {
   constructor(config = {}) {
-    this.apiKey = config.apiKey || process.env.OPENAI_API_KEY;
+    this.apiKey = config.apiKey || OPENAI_API_KEY;
     if (!this.apiKey) {
       throw new Error('OpenAI API key is required');
     }
 
-    // Configuration
-    this.model = config.model || 'gpt-4o-transcribe';
-    this.language = config.language || 'en';
-    this.wsUrl = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview';
+    // Configuration for WebSocket connection
+    this.wsUrl = config.wsUrl || OPENAI_REALTIME_URL;
     this.includeLogprobs = config.includeLogprobs || false;
     this.debug = config.debug || process.env.DEBUG_OPENAI === 'true';
+
+    // OpenAI model and Realtime API settings
+    this.id = config.id || 'transcription-session-' + Date.now();
+    this.inputAudioFormat = config.inputAudioFormat || OPENAI_AUDIO_FORMAT;
+    this.model = config.model || DEFAULT_TRANSCRIPTION_MODEL;
+    this.transcriptionPrompt = config.transcriptionPrompt || '';
+    this.language = config.language || 'en';
+
+    // OpenAI Voice Activity Detection (VAD) configuration
+    // When VAD is enabled, OpenAI automatically detects speech and commits audio buffer
+    // Set vadEnabled to false to manually control when audio is committed for transcription
+    this.vadEnabled = config.vadEnabled !== false; // Default true
+    this.vadType = config.vadType || 'server_vad'; // 'server_vad' or 'semantic_vad'
     
+    // Server VAD settings (only used when vadType is 'server_vad')
+    this.vadThreshold = config.vadThreshold || 0.5;
+    this.vadPrefixPaddingMs = config.vadPrefixPaddingMs || 1000;
+    this.vadSilenceDurationMs = config.vadSilenceDurationMs || 500;
+    
+    // Semantic VAD settings (only used when vadType is 'semantic_vad')
+    this.vadEagerness = config.vadEagerness || 'auto'; // 'low', 'medium', 'high', 'auto'
+
+    // OpenAI Input audio noise reduction settings
+    this.inputAudioNoiseReductionType = config.inputAudioNoiseReductionType || 'near_field';
+
     // WebSocket state
     this.ws = null;
     this.isConnected = false;
     this.sessionId = null;
     this.resampleLogged = false;
-    
-    // Statistics
+    this.responseTimeout = null;
+
+    // Audio buffering state
+    this.audioBuffer = [];
+    this.bufferSize = OPENAI_REQUIRED_SAMPLE_RATE * (DEFAULT_BUFFER_DURATION_MS / 1000); // 100ms at 24kHz-Required for OpenAI Realtime API
+    this.lastSendTime = Date.now();
+
+    // Statistics for monitoring audio tracks and transcriptions
     this.stats = {
-      messagesReceived: 0,
-      transcriptionsCompleted: 0,
-      errors: 0,
-      audioBytesSent: 0,
-      startTime: null
+        audioBytesSent: 0,
+        transcriptionsReceived: 0,
+        errors: 0,
+        startTime: null
     };
-    
-    // Event listeners
+
+    // Event listeners monitoring OpenAI transcription events.
+    // Delta is for partial transcriptions, complete is for final transcriptions.
     this.listeners = {
-      transcriptionDelta: [],
-      transcriptionComplete: [],
-      error: [],
-      connected: [],
-      disconnected: [],
-      speechStarted: [],
-      speechStopped: []
+        transcriptionDelta: [],
+        transcriptionComplete: [],
+        error: [],
+        connected: [],
+        disconnected: []
     };
-    
-    // VAD configuration (disable if threshold is 0)
-    this.vadConfig = (config.vadThreshold === 0 || config.vadSilenceDuration === 0) 
-      ? null
-      : {
-          type: 'server_vad',
-          threshold: config.vadThreshold || 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: config.vadSilenceDuration || 500
-        };
+
+    // Track transcription items by item_id
+    this.transcriptionItems = new Map(); // Track transcriptions by item_id
+    this.currentItemId = null;
+    this.previousItemId = null;
   }
 
-  /**
-   * Connect to OpenAI Realtime API
-   */
-  async connect() {
-    if (this.isConnected) return;
-
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.wsUrl, {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'OpenAI-Beta': 'realtime=v1'
-          },
-          perMessageDeflate: false
-        });
-
-        this.ws.on('open', () => {
-          console.log('🔌 Connected to OpenAI Realtime API');
-          this.isConnected = true;
-          this.stats.startTime = new Date();
-          this.initializeSession();
-          this.emit('connected');
-          resolve();
-        });
-
-        this.ws.on('message', (data) => {
-          const message = JSON.parse(data.toString());
-          this.stats.messagesReceived++;
-          
-          if (this.debug) {
-            console.log(`📥 OpenAI Event [${message.type}]:`, 
-              message.type.includes('audio') ? '(audio data)' : JSON.stringify(message).slice(0, 200));
-          }
-          
-          this.handleMessage(message);
-        });
-
-        this.ws.on('error', (error) => {
-          console.error('WebSocket error:', error);
-          this.emit('error', error);
-          reject(error);
-        });
-
-        this.ws.on('close', (code, reason) => {
-          console.log(`WebSocket closed: ${code} - ${reason}`);
-          this.isConnected = false;
-          this.emit('disconnected', { code, reason: reason.toString() });
-        });
-
-      } catch (error) {
-        console.error('Failed to connect to OpenAI:', error);
-        reject(error);
-      }
-    });
-  }
-
-  /**
-   * Initialize OpenAI session for transcription
-   */
-  initializeSession() {
-    // Build include array based on configuration
-    const includeItems = [];
-    if (this.includeLogprobs) {
-      includeItems.push('item.input_audio_transcription.logprobs');
-    }
-    
-    const sessionUpdate = {
-      type: 'session.update',
-      session: {
-        modalities: ['text'],  // Text only for transcription
-        instructions: 'You are a helpful transcription assistant. Transcribe the audio accurately.',
-        input_audio_format: 'pcm16',  // PCM16 format (will match actual sample rate)
-        output_audio_format: 'pcm16',
-        input_audio_transcription: {
-          model: 'gpt-4o-mini-transcribe',  // Use the mini transcribe model
-          language: this.language || 'en',
-          prompt: 'Transcribe the audio accurately.'
-        },
-        turn_detection: this.vadConfig,
-        temperature: 0.6,  // Minimum for Realtime API
-        max_response_output_tokens: 4096
-      }
-    };
-    
-    // Only add include if we have items
-    if (includeItems.length > 0) {
-      sessionUpdate.include = includeItems;
-    }
-    
-    this.sendMessage(sessionUpdate);
-  }
-
-  /**
-   * Process audio chunk from Pexip
-   */
-  async processAudioChunk(audioData) {
-    if (!this.isConnected) {
-      throw new Error('Not connected to OpenAI');
-    }
-
-    // Validate audio data
-    if (!audioData.samples || !audioData.sampleRate) {
-      throw new Error('Invalid audio data: missing samples or sampleRate');
-    }
-
-    // Resample to 24kHz - OpenAI Realtime API expects 24kHz for pcm16
-    let samples = audioData.samples;
-    if (audioData.sampleRate === 48000) {
-      samples = resampleAudio(audioData.samples, 48000, 24000);
-      if (!this.resampleLogged) {
-        console.log('📊 Resampling audio from 48kHz to 24kHz for OpenAI');
-        this.resampleLogged = true;
-      }
-    } else if (audioData.sampleRate === 16000) {
-      // Upsample from 16kHz to 24kHz as required by OpenAI Realtime
-      samples = resampleAudio(audioData.samples, 16000, 24000);
-      if (!this.resampleLogged) {
-        console.log('📊 Resampling audio from 16kHz to 24kHz for OpenAI');
-        this.resampleLogged = true;
-      }
-    } else if (audioData.sampleRate !== 24000) {
-      console.warn(`⚠️ Unexpected sample rate: ${audioData.sampleRate}Hz`);
-    }
-    
-    // Convert to PCM16 buffer
-    const pcmBuffer = Buffer.from(samples.buffer);
-    
-    // Send to OpenAI
-    this.sendAudioData(pcmBuffer);
-  }
-
-  /**
-   * Send audio data to OpenAI
-   */
-  sendAudioData(buffer) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-
-    const base64Audio = buffer.toString('base64');
-    this.stats.audioBytesSent += buffer.length;
-    
-    if (this.debug) {
-      console.log(`📤 Sending audio: ${buffer.length} bytes`);
-    }
-    
-    this.sendMessage({
-      type: 'input_audio_buffer.append',
-      audio: base64Audio
-    });
-  }
-
-  /**
-   * Commit audio buffer for transcription
-   * Note: Only needed when VAD is disabled
-   */
-  commitAudioBuffer() {
-    if (!this.isConnected) return;
-    
-    // Only commit if VAD is disabled
-    if (this.vadConfig) {
-      console.log('Skipping manual commit - VAD is enabled');
-      return;
-    }
-    
-    this.sendMessage({
-      type: 'input_audio_buffer.commit'
-    });
-  }
-
-  /**
-   * Send message to OpenAI
-   */
-  sendMessage(message) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    }
-  }
-
-  /**
-   * Handle incoming messages from OpenAI
-   */
-  handleMessage(message) {
-    switch (message.type) {
-      case 'session.created':
-        this.sessionId = message.session?.id;
-        console.log(`✅ Session created: ${this.sessionId}`);
-        if (this.debug) {
-          console.log('  Session config:', JSON.stringify(message.session, null, 2));
-        }
-        break;
-
-      case 'session.updated':
-        console.log('✅ Session configuration updated');
-        if (this.debug && message.session) {
-          console.log('  Updated config:', JSON.stringify(message.session, null, 2));
-        }
-        break;
-        
-      case 'input_audio_buffer.speech_started':
-        console.log('🎤 Speech detected - started');
-        this.emit('speechStarted');
-        break;
-        
-      case 'input_audio_buffer.speech_stopped':
-        console.log('🔇 Speech stopped');
-        this.emit('speechStopped');
-        break;
-        
-      case 'input_audio_buffer.committed':
-        console.log('📝 Audio buffer committed for transcription');
-        break;
-        
-      case 'input_audio_buffer.cleared':
-        if (this.debug) {
-          console.log('🗑️ Audio buffer cleared');
-        }
-        break;
-
-      case 'conversation.item.input_audio_transcription.delta':
-        if (this.debug) {
-          console.log(`📝 Transcription delta: "${message.delta}"`);
-        }
-        this.emit('transcriptionDelta', {
-          text: message.delta,
-          itemId: message.item_id,
-          logprobs: message.logprobs
-        });
-        break;
-        
-      case 'conversation.item.input_audio_transcription.completed':
-        if (message.transcript) {
-          this.stats.transcriptionsCompleted++;
-          console.log(`✅ Transcription complete: "${message.transcript}"`);
-          
-          const transcriptionData = {
-            text: message.transcript,
-            itemId: message.item_id
-          };
-          
-          // Add logprobs if available
-          if (message.logprobs) {
-            transcriptionData.logprobs = message.logprobs;
-            if (this.debug) {
-              // Calculate average confidence if logprobs available
-              const avgLogprob = message.logprobs.reduce((sum, lp) => sum + lp.logprob, 0) / message.logprobs.length;
-              const confidence = Math.exp(avgLogprob) * 100;
-              console.log(`  Confidence: ${confidence.toFixed(1)}%`);
-            }
-          }
-          
-          this.emit('transcriptionComplete', transcriptionData);
-        }
-        break;
-        
-      case 'conversation.item.input_audio_transcription.failed':
-        this.stats.errors++;
-        console.error('❌ Transcription failed:', message.error);
-        this.emit('error', new Error(message.error?.message || 'Transcription failed'));
-        break;
-        
-      case 'conversation.item.created':
-        if (this.debug) {
-          console.log(`🆕 Conversation item created: ${message.item?.type || 'unknown'}`);
-        }
-        break;
-
-      case 'error':
-        const errorMsg = message.error?.message || 'Unknown error';
-        const errorCode = message.error?.code;
-        const errorType = message.error?.type;
-        
-        // Don't emit error for empty buffer when VAD is enabled
-        if (errorCode === 'buffer_too_small' && this.vadConfig) {
-          if (this.debug) {
-            console.log('ℹ️ Ignoring buffer_too_small - VAD is handling commits');
-          }
-          return;
-        }
-        
-        this.stats.errors++;
-        console.error(`❌ OpenAI Error [${errorType}]:`, errorMsg);
-        if (errorCode) console.error(`  Code: ${errorCode}`);
-        if (message.error?.param) console.error(`  Param: ${message.error.param}`);
-        if (message.error?.event_id) console.error(`  Caused by event: ${message.error.event_id}`);
-        
-        const error = new Error(errorMsg);
-        error.code = errorCode;
-        error.type = errorType;
-        this.emit('error', error);
-        break;
-
-      default:
-        // Ignore response events in transcription-only mode
-        if (!message.type.startsWith('response.') && 
-            !message.type.startsWith('rate_limits.') &&
-            message.type !== 'conversation.item.created') {
-          if (process.env.DEBUG_OPENAI === 'true') {
-            console.log(`Unknown event: ${message.type}`);
-          }
-        }
-        break;
-    }
-  }
-
-  /**
-   * Disconnect from OpenAI
-   */
-  async disconnect() {
-    if (!this.isConnected || !this.ws) return;
-
-    // Log statistics
-    if (this.stats.startTime) {
-      const duration = (new Date() - this.stats.startTime) / 1000;
-      console.log('\n📊 OpenAI Session Statistics:');
-      console.log(`  Duration: ${duration.toFixed(1)}s`);
-      console.log(`  Messages received: ${this.stats.messagesReceived}`);
-      console.log(`  Transcriptions completed: ${this.stats.transcriptionsCompleted}`);
-      console.log(`  Audio sent: ${(this.stats.audioBytesSent / 1024).toFixed(1)} KB`);
-      console.log(`  Errors: ${this.stats.errors}`);
-    }
-
-    return new Promise((resolve) => {
-      this.ws.on('close', () => {
-        this.isConnected = false;
-        this.ws = null;
-        this.sessionId = null;
-        resolve();
-      });
-
-      this.ws.close();
-    });
-  }
-
-  // Event handling
+  // Subscribe to an event
   on(event, callback) {
     if (this.listeners[event]) {
       this.listeners[event].push(callback);
+    } else {
+      throw new Error(`Unknown event: ${event}`);
     }
   }
 
-  off(event, callback) {
-    if (this.listeners[event]) {
-      const index = this.listeners[event].indexOf(callback);
-      if (index > -1) {
-        this.listeners[event].splice(index, 1);
-      }
-    }
-  }
 
+  // Emit an event to all registered listeners
   emit(event, data) {
     if (this.listeners[event]) {
       this.listeners[event].forEach(callback => {
@@ -415,13 +109,324 @@ export class OpenAITranscriptionService {
       });
     }
   }
-  
-  /**
-   * Get current session statistics
-   */
+
+  // Unsubscribe from an event
+  off(event, callback) {
+    if (this.listeners[event]) {
+      const index = this.listeners[event].indexOf(callback);
+      if (index > -1) {
+        this.listeners[event].splice(index, 1);
+      }
+    }
+  }
+
+  // Connect to OpenAI Realtime API WebSocket
+  async connect() {
+    if (this.isConnected) {
+      console.warn('Already connected to OpenAI Realtime API');
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        this.ws = new WebSocket(this.wsUrl, {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'OpenAI-Beta': OPENAI_BETA_HEADER
+          }
+        });
+
+        this.ws.on('open', () => {
+          console.log('Connected to OpenAI Realtime API');
+          this.isConnected = true;
+          this.stats.startTime = Date.now();
+
+          // Initialize the transcription session with our config
+          setTimeout(() => this.initializeSession(), 100); // Small delay to ensure session is ready
+
+          this.emit('connected', { sessionId: this.id });
+          resolve();
+        });
+
+        // Handle incoming messages from OpenAI
+        this.ws.on('message', (data) => {
+          this.stats.messagesReceived++;
+          try {
+            const message = JSON.parse(data.toString());
+            
+            // Only log important events or when in debug mode
+            const importantEvents = [
+              'error',
+              'conversation.item.input_audio_transcription.completed',
+              'transcription_session.created',
+              'transcription_session.updated'
+            ];
+            
+            if (importantEvents.includes(message.type) || this.debug) {
+              console.log('Received:', message.type);
+            }
+            
+            if (this.debug || message.type === 'error') {
+              console.log('Full message:', JSON.stringify(message, null, 2));
+            }
+            
+            this.handleMessage(message);
+          } catch (error) {
+            console.error('Error parsing message:', error);
+          }
+        });
+
+        // Handle WebSocket errors
+        this.ws.on('error', (error) => {
+          console.error('WebSocket error:', error.message);
+          this.stats.errors++;
+          this.emit('error', error);
+          reject(error);  // Reject the connection promise
+        });
+
+        // Handle connection closing
+        this.ws.on('close', (code, reason) => {
+          console.log(`Disconnected: ${code} - ${reason}`);
+          this.isConnected = false;
+          this.ws = null;
+          this.emit('disconnected', { code, reason: reason.toString() });
+        });
+
+      } catch (error) {
+        console.error('Failed to create WebSocket:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // Initialize the transcription session with our configuration
+  initializeSession() {
+    // Use transcription_session.update with session wrapper (based on working test)
+    const sessionConfig = {
+      type: 'transcription_session.update',
+      session: {
+        input_audio_format: this.inputAudioFormat,
+        input_audio_transcription: {
+          model: this.model,
+          prompt: this.transcriptionPrompt || '',
+          language: this.language
+        }
+      }
+    };
+
+    // Add VAD config if enabled (inside session object)
+    if (this.vadEnabled) {
+      if (this.vadType === 'semantic_vad') {
+        // Semantic VAD configuration for transcription mode
+        sessionConfig.session.turn_detection = {
+          type: 'semantic_vad',
+          eagerness: this.vadEagerness
+          // Note: create_response and interrupt_response are only for conversation mode
+        };
+      } else {
+        // Server VAD configuration
+        sessionConfig.session.turn_detection = {
+          type: 'server_vad',
+          threshold: this.vadThreshold,
+          prefix_padding_ms: this.vadPrefixPaddingMs,
+          silence_duration_ms: this.vadSilenceDurationMs
+        };
+      }
+    }
+
+    // Add noise reduction if configured
+    if (this.inputAudioNoiseReductionType) {
+      sessionConfig.session.input_audio_noise_reduction = {
+        type: this.inputAudioNoiseReductionType
+      };
+    }
+
+    // Add include array if we want logprobs
+    if (this.includeLogprobs) {
+      sessionConfig.session.include = ['item.input_audio_transcription.logprobs'];
+    }
+
+    console.log('Sending transcription_session.update to configure model...');
+    this.ws.send(JSON.stringify(sessionConfig));
+  }
+
+  // Handle incoming messages from OpenAI
+  handleMessage(message) {
+    // Based on the docs, we only handle transcription-specific events
+    switch (message.type) {
+      case 'transcription_session.created':
+        // Session ID is in message.session.id based on the logs
+        this.sessionId = message.session?.id || message.id;
+        console.log('Transcription session created:', this.sessionId);
+        if (this.debug) {
+          console.log('Session details:', message);
+        }
+        break;
+
+      case 'transcription_session.updated':
+        console.log('Transcription session configuration updated');
+        break;
+
+      case 'session.created':
+        // Handle regular session created (in case of transcription intent)
+        this.sessionId = message.session?.id;
+        console.log('Session created:', this.sessionId);
+        break;
+
+      case 'session.updated':
+        console.log('Session configuration updated');
+        break;
+
+      case 'conversation.item.input_audio_transcription.delta':
+        // From docs: contains partial transcription
+        this.emit('transcriptionDelta', {
+          text: message.delta,
+          itemId: message.item_id,
+          contentIndex: message.content_index
+        });
+        break;
+
+      case 'conversation.item.input_audio_transcription.completed':
+        // From docs: contains final transcription
+        this.stats.transcriptionsReceived++;
+        this.emit('transcriptionComplete', {
+          text: message.transcript,
+          itemId: message.item_id,
+          previousItemId: this.previousItemId,
+          contentIndex: message.content_index
+        });
+        break;
+
+      case 'input_audio_buffer.committed':
+        // Track item for ordering
+        this.previousItemId = message.previous_item_id || null;
+        this.currentItemId = message.item_id;
+        break;
+
+      case 'input_audio_buffer.speech_started':
+        // VAD detected speech start
+        if (this.debug) {
+          console.log(`🎤 Speech started at ${message.audio_start_ms}ms`);
+        }
+        break;
+
+      case 'input_audio_buffer.speech_stopped':
+        // VAD detected speech stopped - transcription will follow
+        if (this.debug) {
+          console.log(`🔇 Speech stopped at ${message.audio_end_ms}ms`);
+        }
+        break;
+
+      case 'conversation.item.created':
+        // In transcription mode, these are created but don't contain transcripts
+        // The actual transcription comes in the input_audio_transcription events
+        // We can safely ignore these in transcription-only mode
+        if (this.debug) {
+          console.log('Item created (no transcript in transcription mode):', message.item?.id);
+        }
+        break;
+
+      case 'error':
+        this.stats.errors++;
+        console.error('OpenAI error:', message.error);
+        this.emit('error', new Error(message.error?.message || 'Unknown error'));
+        break;
+
+      default:
+        if (this.debug) {
+          console.log('Unhandled message type:', message.type);
+        }
+    }
+  }
+
+  // Process audio chunk from your audio source (e.g., Pexip)
+  async processAudioChunk(audioData) {
+    if (!this.isConnected) {
+      throw new Error('Not connected to OpenAI');
+    }
+
+    // Validate audio data
+    if (!audioData.samples || !audioData.sampleRate) {
+      throw new Error('Invalid audio data');
+    }
+
+    // Check if we need to resample (OpenAI requires 24kHz)
+    let samples = audioData.samples;
+    if (audioData.sampleRate !== OPENAI_REQUIRED_SAMPLE_RATE) {
+      samples = resampleAudio(audioData.samples, audioData.sampleRate, OPENAI_REQUIRED_SAMPLE_RATE);
+    }
+
+    // Buffer the audio
+    this.audioBuffer.push(samples);
+
+    // Send when we have enough buffered
+    const totalSamples = this.audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+    if (totalSamples >= this.bufferSize) {
+      this.sendBufferedAudio();
+    }
+  }
+
+  // Send buffered audio to OpenAI
+  sendBufferedAudio() {
+    if (this.audioBuffer.length === 0) return;
+
+    // Combine all buffered chunks
+    const totalLength = this.audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+    const combinedSamples = new Int16Array(totalLength);
+    
+    let offset = 0;
+    for (const chunk of this.audioBuffer) {
+      combinedSamples.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // Convert to base64
+    const buffer = Buffer.from(combinedSamples.buffer);
+    const base64Audio = buffer.toString('base64');
+
+    // Send to OpenAI using input_audio_buffer.append
+    this.ws.send(JSON.stringify({
+      type: 'input_audio_buffer.append',
+      audio: base64Audio
+    }));
+
+    // Update stats and clear buffer
+    this.stats.audioBytesSent += buffer.length;
+    this.audioBuffer = [];
+  }
+
+  // Commit audio buffer to trigger transcription
+  commitAudioBuffer() {
+    if (!this.isConnected) return;
+
+    this.ws.send(JSON.stringify({
+      type: 'input_audio_buffer.commit'
+    }));
+  }
+
+  // Disconnect from OpenAI
+  async disconnect() {
+    if (!this.isConnected) return;
+
+    // Send any remaining buffered audio
+    if (this.audioBuffer.length > 0) {
+      this.sendBufferedAudio();
+      this.commitAudioBuffer();
+    }
+
+    // Close WebSocket
+    return new Promise((resolve) => {
+      this.ws.once('close', () => {
+        resolve();
+      });
+      this.ws.close();
+    });
+  }
+
+  // Get current statistics
   getStats() {
     const runtime = this.stats.startTime ? 
-      (new Date() - this.stats.startTime) / 1000 : 0;
+      (Date.now() - this.stats.startTime) / 1000 : 0;
     
     return {
       ...this.stats,
@@ -429,13 +434,5 @@ export class OpenAITranscriptionService {
       isConnected: this.isConnected,
       sessionId: this.sessionId
     };
-  }
-  
-  /**
-   * Enable or disable debug logging
-   */
-  setDebug(enabled) {
-    this.debug = enabled;
-    console.log(`🔧 OpenAI debug logging ${enabled ? 'enabled' : 'disabled'}`);
   }
 }

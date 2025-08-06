@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pexip Transcription Bot - Test Widget</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #555;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .dial-in {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .dial-in:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        .hang-up {
+            background-color: #f44336;
+            color: white;
+        }
+        .hang-up:hover:not(:disabled) {
+            background-color: #da190b;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .connections {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid #eee;
+        }
+        .connection-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .connection-info {
+            flex: 1;
+        }
+        .connection-alias {
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        .connection-meta {
+            font-size: 14px;
+            color: #666;
+        }
+        .hint {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Pexip Transcription Bot - Test Widget</h1>
+        
+        <form id="dialForm">
+            <div class="form-group">
+                <label for="serverUrl">Bot Server URL</label>
+                <input type="text" id="serverUrl" value="http://localhost:3000" required>
+                <div class="hint">The URL where your bot server is running</div>
+            </div>
+
+            <div class="form-group">
+                <label for="conferenceAlias">Conference Alias *</label>
+                <input type="text" id="conferenceAlias" placeholder="metademo" required>
+                <div class="hint">The Pexip conference name/alias to join</div>
+            </div>
+
+            <div class="form-group">
+                <label for="displayName">Display Name</label>
+                <input type="text" id="displayName" value="Transcription Bot" placeholder="Bot Name">
+            </div>
+
+            <div class="form-group">
+                <label for="pin">Conference PIN</label>
+                <input type="password" id="pin" placeholder="Optional">
+            </div>
+
+            <div class="form-group">
+                <label for="pexipNode">Pexip Node</label>
+                <input type="text" id="pexipNode" placeholder="Leave empty to use server default">
+                <div class="hint">e.g., us-cn1.pexipdemo.com</div>
+            </div>
+
+            <div class="form-group">
+                <label for="provider">Transcription Provider</label>
+                <select id="provider">
+                    <option value="">Use server default</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Google Gemini</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <button type="submit" class="dial-in" id="dialInBtn">
+                    📞 Dial In
+                </button>
+                <button type="button" class="hang-up" id="hangUpBtn" disabled>
+                    📴 Hang Up
+                </button>
+            </div>
+        </form>
+
+        <div id="status" class="status"></div>
+
+        <div class="connections">
+            <h2>Active Connections</h2>
+            <div id="connectionsList"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentConnectionId = null;
+        let pollInterval = null;
+
+        const form = document.getElementById('dialForm');
+        const dialInBtn = document.getElementById('dialInBtn');
+        const hangUpBtn = document.getElementById('hangUpBtn');
+        const statusDiv = document.getElementById('status');
+        const connectionsList = document.getElementById('connectionsList');
+
+        // Load active connections on page load
+        loadConnections();
+
+        // Dial-in form submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const serverUrl = document.getElementById('serverUrl').value;
+            const conferenceAlias = document.getElementById('conferenceAlias').value;
+            const displayName = document.getElementById('displayName').value;
+            const pin = document.getElementById('pin').value;
+            const pexipNode = document.getElementById('pexipNode').value;
+            const provider = document.getElementById('provider').value;
+
+            // Build request body
+            const requestBody = {
+                conferenceAlias,
+                displayName: displayName || 'Transcription Bot'
+            };
+
+            if (pin) requestBody.pin = pin;
+            if (pexipNode) requestBody.pexipNode = pexipNode;
+            if (provider) requestBody.transcriptionProvider = provider;
+
+            try {
+                dialInBtn.disabled = true;
+                showStatus('Dialing in...', 'info');
+
+                const response = await fetch(`${serverUrl}/api/dial-in`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentConnectionId = data.connectionId;
+                    showStatus(`✅ Successfully joined conference: ${conferenceAlias}`, 'success');
+                    hangUpBtn.disabled = false;
+                    
+                    // Start polling for active connections
+                    startPolling();
+                } else {
+                    showStatus(`❌ Error: ${data.error}`, 'error');
+                    dialInBtn.disabled = false;
+                }
+            } catch (error) {
+                showStatus(`❌ Connection error: ${error.message}`, 'error');
+                dialInBtn.disabled = false;
+            }
+        });
+
+        // Hang-up button
+        hangUpBtn.addEventListener('click', async () => {
+            if (!currentConnectionId) return;
+
+            const serverUrl = document.getElementById('serverUrl').value;
+
+            try {
+                hangUpBtn.disabled = true;
+                showStatus('Hanging up...', 'info');
+
+                const response = await fetch(`${serverUrl}/api/hang-up`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ connectionId: currentConnectionId })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showStatus(`✅ Disconnected. ${data.transcriptions} transcriptions saved.`, 'success');
+                    currentConnectionId = null;
+                    dialInBtn.disabled = false;
+                    hangUpBtn.disabled = true;
+                } else {
+                    showStatus(`❌ Error: ${data.error}`, 'error');
+                    hangUpBtn.disabled = false;
+                }
+            } catch (error) {
+                showStatus(`❌ Disconnect error: ${error.message}`, 'error');
+                hangUpBtn.disabled = false;
+            }
+        });
+
+        // Show status message
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+        }
+
+        // Load active connections
+        async function loadConnections() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            try {
+                const response = await fetch(`${serverUrl}/api/connections`);
+                const data = await response.json();
+
+                if (data.connections.length === 0) {
+                    connectionsList.innerHTML = '<p style="color: #666;">No active connections</p>';
+                } else {
+                    connectionsList.innerHTML = data.connections.map(conn => `
+                        <div class="connection-item">
+                            <div class="connection-info">
+                                <div class="connection-alias">${conn.conferenceAlias}</div>
+                                <div class="connection-meta">
+                                    ${conn.displayName} • ${conn.provider} • 
+                                    ${conn.transcriptionCount} transcriptions • 
+                                    Started ${new Date(conn.startTime).toLocaleTimeString()}
+                                </div>
+                            </div>
+                            <button class="hang-up" onclick="hangUpConnection('${conn.id}')">
+                                Hang Up
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                connectionsList.innerHTML = '<p style="color: #f44336;">Failed to load connections</p>';
+            }
+        }
+
+        // Hang up a specific connection
+        window.hangUpConnection = async (connectionId) => {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            try {
+                const response = await fetch(`${serverUrl}/api/hang-up`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ connectionId })
+                });
+
+                if (response.ok) {
+                    showStatus('Connection terminated', 'success');
+                    loadConnections();
+                }
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+            }
+        };
+
+        // Start polling for connection updates
+        function startPolling() {
+            loadConnections();
+            pollInterval = setInterval(loadConnections, 5000);
+        }
+
+        // Stop polling when leaving page
+        window.addEventListener('beforeunload', () => {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+        });
+    </script>
+</body>
+</html>
