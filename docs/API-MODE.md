@@ -35,10 +35,10 @@ POST /api/dial-in
 Content-Type: application/json
 
 {
-  "conferenceAlias": "metademo",        // Required
+  "conferenceAlias": "testalias",        // Required
   "displayName": "Transcription Bot",   // Optional
   "pin": "1234",                        // Optional
-  "pexipNode": "us-cn1.pexipdemo.com", // Optional (uses .env default)
+  "pexipNode": "test.domain.com", // Optional (uses .env default)
   "transcriptionProvider": "openai"     // Optional: "openai" or "gemini"
 }
 ```
@@ -47,12 +47,12 @@ Response:
 ```json
 {
   "success": true,
-  "connectionId": "metademo_1234567890",
+  "connectionId": "testdemo_123456",
   "message": "Bot successfully joined conference",
   "conference": {
     "alias": "metademo",
     "displayName": "Transcription Bot",
-    "node": "us-cn1.pexipdemo.com",
+    "node": "test.domain.com",
     "provider": "openai"
   }
 }
@@ -64,7 +64,7 @@ POST /api/hang-up
 Content-Type: application/json
 
 {
-  "connectionId": "metademo_1234567890"
+  "connectionId": "test_1234567890"
   // OR
   "conferenceAlias": "metademo"
 }
@@ -75,7 +75,7 @@ Response:
 {
   "success": true,
   "message": "Bot disconnected from conference",
-  "connectionId": "metademo_1234567890",
+  "connectionId": "test_1234567890",
   "transcriptions": 42,
   "duration": 125000
 }
