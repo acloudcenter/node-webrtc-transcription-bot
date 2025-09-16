@@ -47,10 +47,10 @@ Response:
 ```json
 {
   "success": true,
-  "connectionId": "testdemo_123456",
+  "connectionId": "testtest_123456",
   "message": "Bot successfully joined conference",
   "conference": {
-    "alias": "metademo",
+    "alias": "test",
     "displayName": "Transcription Bot",
     "node": "test.domain.com",
     "provider": "openai"
@@ -66,7 +66,7 @@ Content-Type: application/json
 {
   "connectionId": "test_1234567890"
   // OR
-  "conferenceAlias": "metademo"
+  "conferenceAlias": "test"
 }
 ```
 
