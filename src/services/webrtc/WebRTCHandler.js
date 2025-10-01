@@ -66,21 +66,21 @@ export class WebRTCHandler {
       console.log(`WebRTC: ICE state changed to ${state}`);
       
       if (state === 'checking') {
-        console.log('🔄 Establishing connection to Pexip media server...');
+        console.log('Establishing connection to Pexip media server...');
       } else if (state === 'connected' || state === 'completed') {
-        console.log('✅ WebRTC: Media connection established - audio should be flowing');
+        console.log('WebRTC: Media connection established - audio should be flowing');
         if (this.pendingAudioTrack) {
           console.log('WebRTC: Attaching pending audio sink');
           this.attachAudioSink(this.pendingAudioTrack);
           this.pendingAudioTrack = null;
         }
       } else if (state === 'failed') {
-        console.error('❌ WebRTC: Connection failed - possible firewall/NAT issue');
+        console.error('WebRTC: Connection failed - possible firewall/NAT issue');
         console.error('  Try: 1) Check firewall settings');
         console.error('       2) Ensure UDP ports are open');
         console.error('       3) Try a different network');
       } else if (state === 'disconnected') {
-        console.warn('⚠️ WebRTC: Connection lost - may reconnect...');
+        console.warn('WebRTC: Connection lost - may reconnect...');
       }
     };
 
@@ -110,7 +110,7 @@ export class WebRTCHandler {
       audioSink.ondata = (data) => {
         // Log first data reception for debugging
         if (firstData) {
-          console.log('🎧 WebRTC: First audio data received!');
+          console.log('WebRTC: First audio data received!');
           console.log(`  Sample rate: ${data.sampleRate} Hz`);
           console.log(`  Channels: ${data.channelCount}`);
           console.log(`  Bits per sample: ${data.bitsPerSample}`);
@@ -122,13 +122,13 @@ export class WebRTCHandler {
             console.log(`  Max amplitude: ${maxAmplitude} (${(maxAmplitude/32768*100).toFixed(1)}%)`);
             
             if (maxAmplitude < 10) {
-              console.log('\n⚠️  Conference appears to be silent - waiting for someone to speak...');
+              console.log('\nConference appears to be silent - waiting for someone to speak...');
               console.log('  Possible reasons:');
               console.log('  1. No one has joined the conference yet');
               console.log('  2. All participants are muted');
               console.log('  3. No one is currently speaking\n');
             } else {
-              console.log('  ✅ Audio is active!\n');
+              console.log('  Audio is active!\n');
             }
           }
           firstData = false;
@@ -146,11 +146,11 @@ export class WebRTCHandler {
             const maxAmplitude = Math.max(...Array.from(data.samples.slice(0, 1000)).map(Math.abs));
             if (maxAmplitude < 100) {
               if (!silenceReported) {
-                console.log('🔇 Receiving audio but conference is silent (no one speaking)');
+                console.log('Receiving audio but conference is silent (no one speaking)');
                 silenceReported = true;
               }
             } else {
-              console.log(`🎵 Audio flowing - ${seconds.toFixed(1)}s received, amplitude: ${maxAmplitude}`);
+              console.log(`Audio flowing - ${seconds.toFixed(1)}s received, amplitude: ${maxAmplitude}`);
               silenceReported = false;
             }
           }

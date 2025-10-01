@@ -95,29 +95,6 @@ The bot uses the following flow:
 - **Chunk Duration**: 1 second (configurable)
 - **Codec**: Opus (decoded automatically)
 
-## Key Implementation Details
-
-### ICE Candidate Handling
-The bot implements ICE candidate queuing to handle timing issues:
-```javascript
-// Candidates are queued until call UUID is available
-if (!this.callUuid) {
-  this.pendingIceCandidates.push(event.candidate);
-} else {
-  await this.sendIceCandidate(event.candidate);
-}
-```
-
-### Audio Extraction
-Uses the nonstandard RTCAudioSink API from @roamhq/wrtc:
-```javascript
-const audioSink = new RTCAudioSink(track);
-audioSink.ondata = (data) => {
-  // Process PCM samples (Int16Array)
-  // data.samples, data.sampleRate, data.bitsPerSample
-};
-```
-
 ## Integration with Transcription Services
 
 The bot outputs audio chunks that can be sent to various transcription services:
@@ -167,28 +144,6 @@ Analyzing: ./output/wav/track_chunk_000001.wav
   Non-zero samples: 7999 (99.99%)
   OK: This file contains audio
 ```
-
-## Troubleshooting
-
-### No Audio Captured
-- Verify other participants are in the conference and unmuted
-- Check firewall settings for WebRTC traffic
-- Ensure TURN servers are accessible if behind NAT
-
-### Connection Failed
-- Verify Pexip node address and conference alias
-- Check if PIN is required for the conference
-- Ensure network connectivity to Pexip node
-
-### ICE Connection Issues
-- The bot automatically queues ICE candidates until call UUID is available
-- Check firewall rules for UDP traffic
-- Verify STUN/TURN server accessibility
-
-### Silent Audio
-- Run `test-audio.js` to verify if files contain actual audio
-- Check that participants are unmuted
-- Verify the conference audio mix is not empty
 
 ## Dependencies
 

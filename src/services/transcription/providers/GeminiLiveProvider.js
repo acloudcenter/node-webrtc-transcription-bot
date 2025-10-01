@@ -61,7 +61,7 @@ export class GeminiLiveProvider {
         this.ws = new WebSocket(this.wsUrl);
 
         this.ws.on('open', () => {
-          console.log('🔌 Connected to Gemini Live API');
+          console.log('Connected to Gemini Live API');
           this.isConnected = true;
           this.stats.startTime = new Date();
           this.initializeSession();
@@ -74,14 +74,14 @@ export class GeminiLiveProvider {
           this.stats.messagesReceived++;
           
           if (this.debug) {
-            console.log(`📥 Gemini Event:`, JSON.stringify(message).slice(0, 200));
+            console.log(`Gemini Event:`, JSON.stringify(message).slice(0, 200));
           }
           
           this.handleMessage(message);
         });
 
         this.ws.on('error', (error) => {
-          console.error('❌ Gemini WebSocket error:', error.message);
+          console.error('Gemini WebSocket error:', error.message);
           this.emit('error', error);
           reject(error);
         });
@@ -140,7 +140,7 @@ export class GeminiLiveProvider {
       samples = resampleAudio(audioData.samples, audioData.sampleRate, targetRate);
       
       if (!this.resampleLogged) {
-        console.log(`📊 Resampling for Gemini: ${audioData.sampleRate}Hz → ${targetRate}Hz`);
+        console.log(`Resampling for Gemini: ${audioData.sampleRate}Hz \u2192 ${targetRate}Hz`);
         this.resampleLogged = true;
       }
     }
@@ -215,7 +215,7 @@ export class GeminiLiveProvider {
   handleMessage(message) {
     // Handle setup confirmation
     if (message.setupComplete) {
-      console.log('✅ Gemini session initialized');
+      console.log('Gemini session initialized');
       return;
     }
 
@@ -224,7 +224,7 @@ export class GeminiLiveProvider {
       // Input transcription (what was said)
       if (message.serverContent.inputTranscription) {
         const transcription = message.serverContent.inputTranscription;
-        console.log(`✅ Gemini Transcription: "${transcription.text}"`);
+        console.log(`Gemini Transcription: "${transcription.text}"`);
         
         this.stats.transcriptionsCompleted++;
         this.emit('transcriptionComplete', {
@@ -242,7 +242,7 @@ export class GeminiLiveProvider {
 
       // Handle interruptions
       if (message.serverContent.interrupted) {
-        console.log('🔇 Speech interrupted');
+        console.log('Speech interrupted');
         this.emit('speechStopped');
       }
     }
@@ -258,7 +258,7 @@ export class GeminiLiveProvider {
     // Handle errors
     if (message.error) {
       this.stats.errors++;
-      console.error('❌ Gemini Error:', message.error);
+      console.error('Gemini Error:', message.error);
       this.emit('error', new Error(message.error.message || 'Gemini error'));
     }
   }
@@ -272,7 +272,7 @@ export class GeminiLiveProvider {
     // Log statistics
     if (this.stats.startTime) {
       const duration = (new Date() - this.stats.startTime) / 1000;
-      console.log('\n📊 Gemini Session Statistics:');
+      console.log('\nGemini Session Statistics:');
       console.log(`  Duration: ${duration.toFixed(1)}s`);
       console.log(`  Messages received: ${this.stats.messagesReceived}`);
       console.log(`  Transcriptions completed: ${this.stats.transcriptionsCompleted}`);

@@ -71,7 +71,7 @@ export class OpenAITranscriptionService {
         startTime: null
     };
 
-    // Event listeners monitoring OpenAI transcription events.
+    // Event listeners for OpenAI transcription events.
     // Delta is for partial transcriptions, complete is for final transcriptions.
     this.listeners = {
         transcriptionDelta: [],
@@ -306,14 +306,14 @@ export class OpenAITranscriptionService {
       case 'input_audio_buffer.speech_started':
         // VAD detected speech start
         if (this.debug) {
-          console.log(`🎤 Speech started at ${message.audio_start_ms}ms`);
+          console.log(`Speech started at ${message.audio_start_ms}ms`);
         }
         break;
 
       case 'input_audio_buffer.speech_stopped':
         // VAD detected speech stopped - transcription will follow
         if (this.debug) {
-          console.log(`🔇 Speech stopped at ${message.audio_end_ms}ms`);
+          console.log(`Speech stopped at ${message.audio_end_ms}ms`);
         }
         break;
 

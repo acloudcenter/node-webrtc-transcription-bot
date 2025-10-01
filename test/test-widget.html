@@ -131,7 +131,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎙️ Pexip Transcription Bot - Test Widget</h1>
+        <h1>Pexip Transcription Bot - Test Widget</h1>
         
         <form id="dialForm">
             <div class="form-group">
@@ -173,10 +173,10 @@
 
             <div class="button-group">
                 <button type="submit" class="dial-in" id="dialInBtn">
-                    📞 Dial In
+                    Dial In
                 </button>
                 <button type="button" class="hang-up" id="hangUpBtn" disabled>
-                    📴 Hang Up
+                    Hang Up
                 </button>
             </div>
         </form>
@@ -237,17 +237,17 @@
 
                 if (response.ok) {
                     currentConnectionId = data.connectionId;
-                    showStatus(`✅ Successfully joined conference: ${conferenceAlias}`, 'success');
+                    showStatus(`Successfully joined conference: ${conferenceAlias}`, 'success');
                     hangUpBtn.disabled = false;
                     
                     // Start polling for active connections
                     startPolling();
                 } else {
-                    showStatus(`❌ Error: ${data.error}`, 'error');
+                    showStatus(`Error: ${data.error}`, 'error');
                     dialInBtn.disabled = false;
                 }
             } catch (error) {
-                showStatus(`❌ Connection error: ${error.message}`, 'error');
+                showStatus(`Connection error: ${error.message}`, 'error');
                 dialInBtn.disabled = false;
             }
         });
@@ -271,16 +271,16 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    showStatus(`✅ Disconnected. ${data.transcriptions} transcriptions saved.`, 'success');
+                    showStatus(`Disconnected. ${data.transcriptions} transcriptions saved.`, 'success');
                     currentConnectionId = null;
                     dialInBtn.disabled = false;
                     hangUpBtn.disabled = true;
                 } else {
-                    showStatus(`❌ Error: ${data.error}`, 'error');
+                    showStatus(`Error: ${data.error}`, 'error');
                     hangUpBtn.disabled = false;
                 }
             } catch (error) {
-                showStatus(`❌ Disconnect error: ${error.message}`, 'error');
+                showStatus(`Disconnect error: ${error.message}`, 'error');
                 hangUpBtn.disabled = false;
             }
         });

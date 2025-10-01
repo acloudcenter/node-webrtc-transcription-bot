@@ -8,7 +8,7 @@ export class AudioValidator {
    */
   static validateAudio(samples, expectedRate, location) {
     if (!samples || samples.length === 0) {
-      console.error(`❌ [${location}] No audio samples!`);
+      console.error(`[${location}] No audio samples!`);
       return false;
     }
 
@@ -28,9 +28,9 @@ export class AudioValidator {
 
     // Log validation
     if (info.isSilence) {
-      console.log(`🔇 [${location}] Audio is SILENCE (max amplitude: ${maxAmplitude})`);
+      console.log(`[${location}] Audio is SILENCE (max amplitude: ${maxAmplitude})`);
     } else {
-      console.log(`✅ [${location}] Audio validated - ${samples.length} samples, amplitude: ${maxAmplitude}`);
+      console.log(`[${location}] Audio validated - ${samples.length} samples, amplitude: ${maxAmplitude}`);
     }
 
     return !info.isSilence;
@@ -41,7 +41,7 @@ export class AudioValidator {
    */
   static logPipelineStage(stage, data) {
     const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
-    console.log(`[${timestamp}] 🔊 ${stage}:`, {
+    console.log(`[${timestamp}] ${stage}:`, {
       sampleRate: data.sampleRate,
       samples: data.samples?.length || 0,
       format: data.format || 'pcm16'
@@ -65,13 +65,13 @@ export class AudioValidator {
     const durationDiff = Math.abs(parseFloat(originalDuration) - parseFloat(newDuration));
     
     if (durationDiff > 0.1) { // More than 100ms difference
-      console.warn(`⚠️ [${location}] Resampling duration mismatch!`);
+      console.warn(`[${location}] Resampling duration mismatch!`);
       console.warn(`   Original: ${originalDuration}s at ${originalRate}Hz`);
       console.warn(`   Resampled: ${newDuration}s at ${newRate}Hz`);
       return false;
     }
     
-    console.log(`✅ [${location}] Resampling verified: ${originalRate}Hz → ${newRate}Hz (${originalDuration}s)`);
+    console.log(`[${location}] Resampling verified: ${originalRate}Hz → ${newRate}Hz (${originalDuration}s)`);
     return true;
   }
 }

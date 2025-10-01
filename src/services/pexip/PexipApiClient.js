@@ -63,7 +63,6 @@ export class PexipApiClient {
     this.tokenExpiry = result.expires ? parseInt(result.expires) : 120; // Default 120 seconds
     
     console.log(`Token obtained, participant UUID: ${this.participantUuid}`);
-    console.log(`Token expires in: ${this.tokenExpiry} seconds`);
     if (this.turnServers) {
       console.log(`TURN servers available: ${this.turnServers.length}`);
     }

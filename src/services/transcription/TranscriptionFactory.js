@@ -8,7 +8,7 @@ export class TranscriptionFactory {
   static create(provider = 'openai', config = {}) {
     const providerName = (provider || process.env.TRANSCRIPTION_PROVIDER || 'openai').toLowerCase();
     
-    console.log(`🏭 Creating transcription provider: ${providerName}`);
+    console.log(`Creating transcription provider: ${providerName}`);
     
     switch (providerName) {
       case 'openai':

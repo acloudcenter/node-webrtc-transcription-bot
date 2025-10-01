@@ -12,9 +12,6 @@ const __dirname = dirname(__filename);
 dotenv.config();
 
 async function testMicrophoneTranscription() {
-  console.log('OpenAI Realtime Microphone Transcription Test');
-  console.log('================================================\n');
-  
   if (!process.env.OPENAI_API_KEY) {
     console.error('ERROR: OPENAI_API_KEY not found in .env file');
     process.exit(1);
@@ -102,7 +99,6 @@ async function testMicrophoneTranscription() {
     
     console.log('Starting microphone capture...\n');
     console.log('Speak into your microphone. Press Ctrl+C to stop.\n');
-    console.log('========================================\n');
     
     // Start recording from microphone
     const recording = recorder.record({

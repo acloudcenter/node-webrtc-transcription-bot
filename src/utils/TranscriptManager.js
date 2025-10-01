@@ -32,7 +32,7 @@ export class TranscriptManager {
     this.transcriptData = []; // Array of full transcript objects with metadata
     this.orderedItems = new Map(); // For tracking item ordering
     
-    console.log(`📝 Transcript files:`);
+    console.log(`Transcript files:`);
     console.log(`   Timestamped: ${path.basename(this.timestampedFile)}`);
     console.log(`   Clean: ${path.basename(this.cleanFile)}`);
     console.log(`   JSON: ${path.basename(this.jsonFile)}`);

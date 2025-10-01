@@ -2,7 +2,6 @@ import WebSocket from "ws";
 import dotenv from "dotenv";
 
 dotenv.config();
-// Validate OpenAI API key
 if (!process.env.OPENAI_API_KEY) {
   console.error('Missing OPENAI_API_KEY in .env');
   process.exit(1);

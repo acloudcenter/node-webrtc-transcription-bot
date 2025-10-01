@@ -23,8 +23,8 @@ const activeConnections = new Map();
  * Health check endpoint
  */
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     activeConnections: activeConnections.size,
     timestamp: new Date().toISOString()
   });
@@ -44,14 +44,14 @@ app.post('/api/dial-in', async (req, res) => {
 
   // Validate required fields
   if (!conferenceAlias) {
-    return res.status(400).json({ 
-      error: 'Missing required field: conferenceAlias' 
+    return res.status(400).json({
+      error: 'Missing required field: conferenceAlias'
     });
   }
 
   if (!pexipNode) {
-    return res.status(400).json({ 
-      error: 'Missing Pexip node address. Set PEXIP_NODE in .env or provide pexipNode in request.' 
+    return res.status(400).json({
+      error: 'Missing Pexip node address. Set PEXIP_NODE in .env or provide pexipNode in request.'
     });
   }
 
@@ -61,15 +61,15 @@ app.post('/api/dial-in', async (req, res) => {
   // Check if already connected to this conference
   const existingConnection = Array.from(activeConnections.values())
     .find(conn => conn.conferenceAlias === conferenceAlias && conn.isActive);
-  
+
   if (existingConnection) {
-    return res.status(409).json({ 
+    return res.status(409).json({
       error: 'Bot already connected to this conference',
       connectionId: existingConnection.id
     });
   }
 
-  console.log(`\n📞 Dial-in request received:`);
+  console.log(`Dial-in request received:`);
   console.log(`   Conference: ${conferenceAlias}`);
   console.log(`   Display Name: ${displayName}`);
   console.log(`   Node: ${pexipNode}`);
@@ -84,10 +84,10 @@ app.post('/api/dial-in', async (req, res) => {
 
     // Create transcription service
     const transcriptionConfig = {
-      apiKey: transcriptionProvider === 'gemini' ? 
+      apiKey: transcriptionProvider === 'gemini' ?
         process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY,
-      model: transcriptionProvider === 'gemini' ? 
-        'gemini-live-2.5-flash-preview' : 
+      model: transcriptionProvider === 'gemini' ?
+        'gemini-live-2.5-flash-preview' :
         (process.env.OPENAI_MODEL || 'gpt-4o-transcribe'),
       language: process.env.TRANSCRIPTION_LANGUAGE || 'en',
       vadEnabled: process.env.VAD_ENABLED !== 'false',
@@ -99,7 +99,7 @@ app.post('/api/dial-in', async (req, res) => {
     };
 
     const transcriptionService = TranscriptionFactory.create(
-      transcriptionProvider, 
+      transcriptionProvider,
       transcriptionConfig
     );
 
@@ -118,7 +118,7 @@ app.post('/api/dial-in', async (req, res) => {
 
     // Connect to transcription service
     await transcriptionService.connect();
-    console.log(`✅ ${transcriptionProvider} connected`);
+    console.log(`${transcriptionProvider} connected`);
 
     // Create Pexip connection
     const connection = new PexipConnection({
@@ -141,7 +141,7 @@ app.post('/api/dial-in', async (req, res) => {
 
     // Connect to Pexip
     await connection.connect();
-    console.log(`✅ Connected to conference: ${conferenceAlias}`);
+    console.log(`Connected to conference: ${conferenceAlias}`);
 
     // Store connection info
     const connectionInfo = {
@@ -173,10 +173,10 @@ app.post('/api/dial-in', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Dial-in failed:', error.message);
-    res.status(500).json({ 
+    console.error('Dial-in failed:', error.message);
+    res.status(500).json({
       error: 'Failed to join conference',
-      message: error.message 
+      message: error.message
     });
   }
 });
@@ -198,19 +198,19 @@ app.post('/api/hang-up', async (req, res) => {
   }
 
   if (!targetConnection) {
-    return res.status(404).json({ 
-      error: 'Connection not found' 
+    return res.status(404).json({
+      error: 'Connection not found'
     });
   }
 
-  console.log(`\n📞 Hang-up request for: ${targetConnection.conferenceAlias}`);
+  console.log(`Hang-up request for: ${targetConnection.conferenceAlias}`);
 
   try {
     // Save transcripts
     const stats = targetConnection.transcriptManager.getStats();
     if (stats.transcriptionCount > 0) {
       const files = await targetConnection.transcriptManager.save();
-      console.log(`💾 Saved ${stats.transcriptionCount} transcriptions`);
+      console.log(`Saved ${stats.transcriptionCount} transcriptions`);
     }
 
     // Disconnect services
@@ -233,10 +233,10 @@ app.post('/api/hang-up', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Hang-up failed:', error.message);
-    res.status(500).json({ 
+    console.error('Hang-up failed:', error.message);
+    res.status(500).json({
       error: 'Failed to disconnect',
-      message: error.message 
+      message: error.message
     });
   }
 });
@@ -266,13 +266,13 @@ app.get('/api/connections', (req, res) => {
  */
 app.get('/api/connections/:connectionId', (req, res) => {
   const connection = activeConnections.get(req.params.connectionId);
-  
+
   if (!connection) {
     return res.status(404).json({ error: 'Connection not found' });
   }
 
   const stats = connection.transcriptManager.getStats();
-  
+
   res.json({
     id: connection.id,
     conferenceAlias: connection.conferenceAlias,
@@ -291,25 +291,20 @@ app.get('/api/connections/:connectionId', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log('='.repeat(60));
   console.log('PEXIP TRANSCRIPTION BOT - API SERVER');
-  console.log('='.repeat(60));
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log('');
   console.log('Available endpoints:');
   console.log(`  GET  /health              - Health check`);
   console.log(`  POST /api/dial-in         - Join a conference`);
   console.log(`  POST /api/hang-up         - Leave a conference`);
   console.log(`  GET  /api/connections     - List active connections`);
   console.log(`  GET  /api/connections/:id - Get connection details`);
-  console.log('='.repeat(60));
-  console.log('');
 });
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n\nShutting down server...');
-  
+
   // Disconnect all active connections
   for (const [id, connection] of activeConnections) {
     if (connection.isActive) {
@@ -322,7 +317,7 @@ process.on('SIGINT', async () => {
       }
     }
   }
-  
+
   console.log('Server stopped');
   process.exit(0);
 });

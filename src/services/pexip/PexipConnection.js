@@ -30,7 +30,7 @@ export class PexipConnection {
    */
   async connect() {
     try {
-      console.log('=== Connecting to Pexip Conference ===');
+      console.log('Connecting to Pexip Conference');
       
       // Step 1: Get authentication token
       const { token, participantUuid, turnServers, expires } = await this.api.requestToken(
@@ -44,7 +44,7 @@ export class PexipConnection {
       // Step 2: Create WebRTC peer connection
       this.webrtc.createPeerConnection(turnServers);
       
-      // Set up ICE candidate handler - QUEUE them until we have callUuid
+      // Set up ICE candidate handler - queue them until we have a callUuid
       this.webrtc.setIceCandidateHandler(async (candidate) => {
         if (!this.callUuid) {
           // Queue the candidate until we have a call UUID
@@ -79,13 +79,12 @@ export class PexipConnection {
       this.startEventPolling();
       
       this.isRunning = true;
-      console.log('✅ Successfully connected to conference');
-      console.log('=================================\n');
+      console.log('Successfully connected to conference');
       
       // Check ICE connection after 5 seconds
       setTimeout(() => {
         if (this.webrtc.pc && !this.webrtc.isConnected()) {
-          console.warn('\n⚠️  WebRTC media connection not established after 5 seconds');
+          console.warn('\nWebRTC media connection not established after 5 seconds');
           console.warn('  This means audio is NOT flowing yet.');
           console.warn('  Possible issues:');
           console.warn('  - Firewall blocking UDP traffic');
@@ -96,7 +95,7 @@ export class PexipConnection {
       
       return true;
     } catch (error) {
-      console.error('❌ Connection failed:', error.message);
+      console.error('Connection failed:', error.message);
       throw error;
     }
   }
@@ -184,12 +183,12 @@ export class PexipConnection {
 
       try {
         const { expires } = await this.api.refreshToken();
-        console.log('✅ Token refreshed successfully');
+        console.log('Token refreshed successfully');
         
         // Schedule next refresh
         this.startTokenRefresh(expires);
       } catch (error) {
-        console.error('❌ Token refresh failed:', error.message);
+        console.error('Token refresh failed:', error.message);
         // Token refresh failed - connection will likely drop
         // Could implement retry logic here if needed
       }
@@ -216,7 +215,7 @@ export class PexipConnection {
       return;
     }
     
-    console.log('\n=== Disconnecting from Pexip ===');
+    console.log('\nDisconnecting from Pexip');
     this.isRunning = false;
     
     // Step 1: Stop token refresh
@@ -242,7 +241,7 @@ export class PexipConnection {
       // Errors are already handled in the API client
     }
     
-    console.log('✅ Disconnected from Pexip\n');
+    console.log('Disconnected from Pexip\n');
   }
 
   /**

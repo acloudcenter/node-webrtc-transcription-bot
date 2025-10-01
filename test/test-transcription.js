@@ -6,9 +6,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 async function testTranscription() {
-  console.log('Testing OpenAI Realtime Transcription Service\n');
-  console.log('==========================================\n');
-  
   const provider = new OpenAIRealtimeProvider({
     apiKey: process.env.OPENAI_API_KEY,
     model: 'gpt-4o-transcribe',
@@ -20,10 +17,6 @@ async function testTranscription() {
     includeLogprobs: false,
     sendDirectly: true
   });
-  
-  console.log('Provider info:', provider.getInfo());
-  console.log('Capabilities:', provider.getCapabilities());
-  console.log('\n');
   
   provider.on('transcriptionDelta', (delta) => {
     console.log(`[DELTA] ${delta.text}`);
@@ -38,7 +31,7 @@ async function testTranscription() {
   });
   
   provider.on('connected', () => {
-    console.log('✓ Connected to OpenAI Realtime API\n');
+    console.log('Connected to OpenAI Realtime API\n');
   });
   
   provider.on('disconnected', (info) => {
@@ -80,12 +73,12 @@ async function testTranscription() {
       });
       
     } else {
-      // Use multiple consecutive files for better testing
+      // Use a few consecutive files for better testing
       const sessionPrefix = '9f54ab5b-a52a-4ed9-8e10-b62aa28802d6';
       const testFiles = wavFiles
         .filter(f => f.startsWith(sessionPrefix))
         .sort()
-        .slice(0, 5);  // Use first 5 chunks
+        .slice(0, 5);  // Use the first 5 chunks
       
       if (testFiles.length === 0) {
         testFiles.push(wavFiles[0]);
@@ -114,7 +107,7 @@ async function testTranscription() {
           timestamp: Date.now() + (fileIndex * 1000)
         });
         
-        // Small delay between chunks
+        // Add a small delay between chunks
         await new Promise(resolve => setTimeout(resolve, 200));
       }
       
@@ -126,7 +119,7 @@ async function testTranscription() {
     console.log('\nWaiting for transcription results...');
     await new Promise(resolve => setTimeout(resolve, 5000));
     
-    // Try to commit any remaining buffer
+    // Commit any remaining audio in the buffer
     console.log('Attempting to commit any remaining audio buffer...');
     try {
       provider.commitAudioBuffer();

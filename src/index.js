@@ -11,13 +11,6 @@ dotenv.config();
 
 async function main() {
   const PROVIDER = process.env.TRANSCRIPTION_PROVIDER || 'openai';
-  
-  console.log('='.repeat(60));
-  console.log(`PEXIP TO ${PROVIDER.toUpperCase()} TRANSCRIPTION`);
-  console.log('='.repeat(60));
-  console.log(`Pexip Node: ${process.env.PEXIP_NODE}`);
-  console.log(`Conference: ${process.env.CONFERENCE_ALIAS}`);
-  console.log('');
 
   // Validate config
   if (!process.env.PEXIP_NODE || !process.env.CONFERENCE_ALIAS) {
@@ -44,7 +37,7 @@ async function main() {
   const INCLUDE_LOGPROBS = process.env.INCLUDE_LOGPROBS === 'true';
   
   if (DEBUG_MODE) {
-    console.log(`🔧 Debug mode enabled for ${PROVIDER}`);
+    console.log(`Debug mode enabled for ${PROVIDER}`);
   }
   
   // Provider-specific config
@@ -69,7 +62,7 @@ async function main() {
   });
 
   transcriptionService.on('transcriptionComplete', (transcription) => {
-    console.log('\n[✅ Complete]:', transcription.text);
+    console.log('\n[Complete]:', transcription.text);
     
     // Add to transcript manager with metadata
     const metadata = {
@@ -97,7 +90,7 @@ async function main() {
   // Connect to transcription service first
   console.log(`Connecting to ${PROVIDER}...`);
   await transcriptionService.connect();
-  console.log(`✅ ${PROVIDER} connected\n`);
+  console.log(`\n✅ ${PROVIDER} connected\n`);
 
   // Track if we've logged sample rate
   let sampleRateLogged = false;
@@ -109,10 +102,10 @@ async function main() {
     displayName: process.env.DISPLAY_NAME || 'Simple Transcriber',
     pin: process.env.PIN || '',
     
-    // Stream audio directly to OpenAI
+    // Stream audio directly to the transcription service
     onAudioData: async (audioData) => {
       try {
-        // Log actual sample rate to understand what we're getting
+        // Log the actual sample rate to understand what we're getting
         if (!sampleRateLogged) {
           console.log(`\n📊 Audio Stream Info:`);
           console.log(`  Sample Rate: ${audioData.sampleRate} Hz`);
@@ -139,7 +132,6 @@ async function main() {
   await connection.connect();
   console.log('✅ Pexip connected\n');
   console.log('Transcription active. Press Ctrl+C to stop.\n');
-  console.log('-'.repeat(60));
 
   // Only commit audio buffer if VAD is disabled
   let commitInterval = null;
@@ -158,7 +150,7 @@ async function main() {
     }
   }
   
-  // Periodic stats reporting (every 30 seconds)
+  // Report stats every 30 seconds
   const statsInterval = setInterval(() => {
     const serviceStats = transcriptionService.getStats();
     const transcriptStats = transcriptManager.getStats();
