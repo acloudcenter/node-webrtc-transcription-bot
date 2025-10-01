@@ -1,5 +1,7 @@
 # Pexip WebRTC Transcription Bot
 
+## Work in Progress - Demo Purposes Only
+
 A Node.js bot that joins Pexip conferences via WebRTC to capture and process audio streams for transcription purposes. This bot operates headlessly without requiring a browser, making it ideal for server-side audio processing and transcription services.
 
 ## Features
@@ -97,13 +99,9 @@ The bot uses the following flow:
 
 ## Integration with Transcription Services
 
-The bot outputs audio chunks that can be sent to various transcription services:
+The bot outputs audio chunks that can be sent to OpenAI RealTimeAPI. Other services to test in the future.
+- OpenAI Realtime API
 
-- Google Speech-to-Text
-- Azure Speech Services
-- AWS Transcribe
-- OpenAI Whisper
-- Custom STT solutions
 
 Example integration point in `AudioProcessor.js`:
 ```javascript
@@ -153,7 +151,7 @@ Analyzing: ./output/wav/track_chunk_000001.wav
 
 ## Known Limitations
 
-- Audio is received at 16kHz instead of the expected 48kHz (Pexip's phone quality setting)
+- Audio is received at 16kHz instead of the expected 48kHz (Pexip's webRTC quality setting)
 - Only processes mixed conference audio (not individual participant streams)
 - Requires @roamhq/wrtc specifically for RTCAudioSink support
 
