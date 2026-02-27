@@ -55,6 +55,9 @@ export class PexipApiClient {
     return this.handleTokenResponse(response);
   }
 
+  /**
+   * Handle token response, set token expiry, and log turn servers
+   */
   handleTokenResponse(response) {
     const result = response.data.result;
     this.token = result.token;
@@ -64,7 +67,7 @@ export class PexipApiClient {
     
     console.log(`Token obtained, participant UUID: ${this.participantUuid}`);
     if (this.turnServers) {
-      console.log(`TURN servers available: ${this.turnServers.length}`);
+      console.log(`TURN servers available: ${this.turnServers.length}`); //
     }
     
     return {
@@ -76,7 +79,8 @@ export class PexipApiClient {
   }
 
   /**
-   * Join conference with WebRTC offer
+   * Join conference with WebRTC offer and SDP info
+   * Using Axios for requests
    */
   async joinCall(sdp) {
     const response = await axios.post(
@@ -89,7 +93,8 @@ export class PexipApiClient {
       {
         headers: {
           'Content-Type': 'application/json',
-          'token': this.token
+          'token': this.token,
+          'pin': this.pin || '' // If PIN is required, it must be supplied in the header per Pexip docs
         }
       }
     );
@@ -126,7 +131,7 @@ export class PexipApiClient {
   }
 
   /**
-   * Send ICE candidate
+   * Send ICE candidates
    */
   async sendIceCandidate(callUuid, candidate) {
     try {
@@ -151,7 +156,7 @@ export class PexipApiClient {
   }
 
   /**
-   * Poll for events
+   * Poll for events after call is established
    */
   async getEvents() {
     const response = await axios.get(
@@ -179,7 +184,8 @@ export class PexipApiClient {
       );
       console.log('Call disconnected successfully');
     } catch (error) {
-      // 403 means already disconnected or token expired - this is OK
+      // 403 on disconnect means already disconnected or token expired - this is OK
+      // TODO: Add a more robust error handling mechanism
       if (error.response?.status === 403) {
         console.log('Call already disconnected');
       } else {
@@ -189,7 +195,7 @@ export class PexipApiClient {
   }
 
   /**
-   * Refresh authentication token
+   * Refresh authentication token before it expires - Default 120 seconds
    */
   async refreshToken() {
     if (!this.token) {
@@ -231,7 +237,7 @@ export class PexipApiClient {
   }
 
   /**
-   * Release token
+   * Release token when call is disconnected
    */
   async releaseToken() {
     if (!this.token) return;

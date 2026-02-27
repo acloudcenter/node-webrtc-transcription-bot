@@ -2,7 +2,7 @@ import { PexipApiClient } from './PexipApiClient.js';
 import { WebRTCHandler } from '../webrtc/WebRTCHandler.js';
 
 /**
- * Simplified Pexip connection orchestrator
+ * Pexip connection Manager
  * Connects to Pexip conference and extracts audio stream
  */
 export class PexipConnection {
@@ -10,7 +10,7 @@ export class PexipConnection {
     this.config = {
       nodeAddress: config.nodeAddress,
       conferenceAlias: config.conferenceAlias,
-      displayName: config.displayName || 'Transcription Bot',
+      displayName: config.displayName || 'Transcription Agent',
       pin: config.pin || '',
       onAudioData: config.onAudioData || null
     };
@@ -21,16 +21,16 @@ export class PexipConnection {
     this.callUuid = null;
     this.eventPollInterval = null;
     this.isRunning = false;
-    this.pendingIceCandidates = [];  // Queue for ICE candidates before we have callUuid
-    this.tokenRefreshTimer = null;  // Timer for token refresh
+    this.pendingIceCandidates = [];  // Queue for ICE candidates until callUuid is returned
+    this.tokenRefreshTimer = null;  // Timer for token refresh - default 120 seconds
   }
 
   /**
-   * Connect to Pexip conference
+   * Connect to Pexip conference using the Pexip API client
    */
   async connect() {
     try {
-      console.log('Connecting to Pexip Conference');
+      console.log('Connecting to conference...');
       
       // Step 1: Get authentication token
       const { token, participantUuid, turnServers, expires } = await this.api.requestToken(
@@ -48,7 +48,7 @@ export class PexipConnection {
       this.webrtc.setIceCandidateHandler(async (candidate) => {
         if (!this.callUuid) {
           // Queue the candidate until we have a call UUID
-          console.log('Queueing ICE candidate (no call UUID yet)');
+          console.log('Queueing ICE candidate... no call UUID yet');
           this.pendingIceCandidates.push(candidate);
         } else {
           await this.api.sendIceCandidate(this.callUuid, candidate);
@@ -60,7 +60,7 @@ export class PexipConnection {
       const { callUuid, sdp } = await this.api.joinCall(offer.sdp);
       this.callUuid = callUuid;
       
-      // Send any queued ICE candidates now that we have a call UUID
+      // Send any queued ICE candidates after callUuid is returned
       if (this.pendingIceCandidates.length > 0) {
         console.log(`Sending ${this.pendingIceCandidates.length} queued ICE candidates...`);
         for (const candidate of this.pendingIceCandidates) {
@@ -75,7 +75,7 @@ export class PexipConnection {
       // Step 5: Send ACK to start media flow
       await this.api.sendAck(callUuid);
 
-      // Step 6: Start event polling
+      // Step 6: Start event polling after call is established
       this.startEventPolling();
       
       this.isRunning = true;
@@ -133,7 +133,7 @@ export class PexipConnection {
   async handleEvent(event) {
     switch (event.event) {
       case 'new_offer':
-        // Handle renegotiation
+        // Handle renegotiation if needed
         const answer = await this.webrtc.handleRemoteOffer(event.sdp);
         await this.api.sendAck(this.callUuid, answer.sdp);
         console.log('Handled new offer from Pexip');
@@ -154,7 +154,7 @@ export class PexipConnection {
         await this.disconnect();
         break;
         
-      // Ignore participant events and other non-critical events
+      // Ignore participant events and other non-critical events but log them
       default:
         if (!event.event.startsWith('participant_') && event.event !== 'stage') {
           console.log(`Event: ${event.event}`);
@@ -172,7 +172,7 @@ export class PexipConnection {
       clearTimeout(this.tokenRefreshTimer);
     }
 
-    // Refresh 30 seconds before expiry (or at 75% of lifetime for shorter tokens)
+    // Refresh 30 seconds before expiry or at 75% of lifetime for shorter tokens
     const refreshBuffer = Math.min(30, Math.floor(expiresInSeconds * 0.25));
     const refreshInterval = (expiresInSeconds - refreshBuffer) * 1000;
 
@@ -190,7 +190,7 @@ export class PexipConnection {
       } catch (error) {
         console.error('Token refresh failed:', error.message);
         // Token refresh failed - connection will likely drop
-        // Could implement retry logic here if needed
+        // TODO: Implement more robust retry logic here
       }
     }, refreshInterval);
   }
@@ -218,22 +218,22 @@ export class PexipConnection {
     console.log('\nDisconnecting from Pexip');
     this.isRunning = false;
     
-    // Step 1: Stop token refresh
+    // Stop token refresh
     this.stopTokenRefresh();
     
-    // Step 2: Stop event polling
+    // Stop event polling
     if (this.eventPollTimeout) {
       clearTimeout(this.eventPollTimeout);
       this.eventPollTimeout = null;
     }
 
-    // Step 3: Close WebRTC connection first (this stops media)
+    // Close WebRTC connection first (this stops media)
     this.webrtc.disconnect();
     
-    // Step 4: Small delay to ensure WebRTC is closed
+    // Small delay to ensure WebRTC is closed
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Step 5: Disconnect from Pexip API
+    // Disconnect from Pexip API
     try {
       await this.api.disconnectCall(this.callUuid);
       await this.api.releaseToken();
